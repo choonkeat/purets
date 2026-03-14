@@ -114,10 +114,10 @@ test("wrong type in generic", () => {
 
 console.log("\nDisallowed constructs (should reject):");
 
-test("function in file", () => {
+test("this keyword banned in function", () => {
   const out = checkFails("invalid-has-function.pure.ts");
   assert(out !== null, "Expected validation to fail");
-  assert(out.includes("function") && out.includes("not allowed"), "Expected function rejection");
+  assert(out.includes("this") && out.includes("not allowed"), "Expected this rejection");
 });
 
 test("class in file", () => {
@@ -132,11 +132,10 @@ test("interface in file", () => {
   assert(out.includes("'interface' is not allowed"), "Expected interface rejection");
 });
 
-test("let/var/function in file", () => {
+test("let/var in file", () => {
   const out = checkFails("invalid-code-in-values.pure.ts");
   assert(out !== null, "Expected validation to fail");
   assert(out.includes("let") && out.includes("not allowed"), "Expected let rejection");
-  assert(out.includes("function") && out.includes("not allowed"), "Expected function rejection");
 });
 
 test("import from non-pure module", () => {
@@ -210,11 +209,22 @@ test("default import banned", () => {
 
 // --- Arrow functions and purity ---
 
-console.log("\nArrow functions and purity:");
+console.log("\nFunctions and purity:");
 
 test("valid arrow functions", () => {
   const out = check("valid-arrow-functions.pure.ts");
   assert(out.includes("All values type-check successfully"), "Expected success");
+});
+
+test("valid function declarations", () => {
+  const out = check("valid-function-decl.pure.ts");
+  assert(out.includes("All values type-check successfully"), "Expected success");
+});
+
+test("this keyword banned", () => {
+  const out = checkFails("invalid-has-this.pure.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("this") && out.includes("not allowed"), "Expected this rejection");
 });
 
 test("IO globals banned (console)", () => {

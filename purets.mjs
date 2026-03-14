@@ -65,7 +65,8 @@ function validateAST(filePath) {
       }
 
       case ts.SyntaxKind.FunctionDeclaration:
-        errors.push({ line, message: "'function' declarations are not allowed. Use arrow functions: const f = (x: T) => ..." });
+        // function declarations allowed — validate purity
+        validateFunction(node, line);
         break;
 
       case ts.SyntaxKind.ClassDeclaration:
@@ -151,6 +152,33 @@ function validateAST(filePath) {
     }
   }
 
+  function validateFunction(node, line) {
+    // Check for async modifier
+    if (node.modifiers) {
+      for (const mod of node.modifiers) {
+        if (mod.kind === ts.SyntaxKind.AsyncKeyword) {
+          errors.push({ line, message: "'async' functions are not allowed. .pure.ts functions must be pure." });
+        }
+      }
+    }
+
+    // Check for generator functions
+    if (node.asteriskToken) {
+      errors.push({ line, message: "Generator functions are not allowed in .pure.ts files." });
+    }
+
+    // Check explicit return type if present
+    if (node.type) {
+      const returnTypeText = node.type.getText(sourceFile);
+      checkReturnTypeText(returnTypeText, line);
+    }
+
+    // Scan body for banned globals and `this`
+    if (node.body) {
+      checkForBannedGlobals(node.body, line);
+    }
+  }
+
   function validateImport(node, line) {
     const moduleSpecifier = node.moduleSpecifier;
     if (moduleSpecifier && ts.isStringLiteral(moduleSpecifier)) {
@@ -205,6 +233,10 @@ function validateAST(filePath) {
         const line = getLineNumber(n);
         errors.push({ line, message: `'${n.text}' is not allowed. .pure.ts files must be free of IO and side effects.` });
       }
+      if (n.kind === ts.SyntaxKind.ThisKeyword) {
+        const line = getLineNumber(n);
+        errors.push({ line, message: "'this' is not allowed. .pure.ts functions must be pure and stateless." });
+      }
       ts.forEachChild(n, walk);
     }
     walk(node);
@@ -246,33 +278,41 @@ function checkTypes(filePath, extraTscOptions = {}) {
     }
   }
 
-  // Check inferred return types of arrow functions
+  // Check inferred return types of functions (arrow + standard)
   if (sourceFile) {
     for (const statement of sourceFile.statements) {
+      let fnNodes = [];
+
       if (ts.isVariableStatement(statement)) {
         for (const decl of statement.declarationList.declarations) {
           if (decl.initializer && ts.isArrowFunction(decl.initializer)) {
-            const sig = checker.getSignatureFromDeclaration(decl.initializer);
-            if (sig) {
-              const returnType = checker.getReturnTypeOfSignature(sig);
-              const typeName = checker.typeToString(returnType);
-              const { line } = sourceFile.getLineAndCharacterOfPosition(decl.getStart());
+            fnNodes.push({ node: decl.initializer, pos: decl.getStart() });
+          }
+        }
+      } else if (ts.isFunctionDeclaration(statement)) {
+        fnNodes.push({ node: statement, pos: statement.getStart() });
+      }
 
-              if (BANNED_RETURN_TYPES.has(typeName)) {
-                errors.push({
-                  line: line + 1,
-                  code: "PURETS",
-                  message: `Arrow function infers return type '${typeName}'. Functions must return a concrete data type.`,
-                });
-              }
-              if (typeName.startsWith("Promise")) {
-                errors.push({
-                  line: line + 1,
-                  code: "PURETS",
-                  message: `Arrow function infers return type '${typeName}'. Async/Promise types are not allowed.`,
-                });
-              }
-            }
+      for (const { node: fnNode, pos } of fnNodes) {
+        const sig = checker.getSignatureFromDeclaration(fnNode);
+        if (sig) {
+          const returnType = checker.getReturnTypeOfSignature(sig);
+          const typeName = checker.typeToString(returnType);
+          const { line } = sourceFile.getLineAndCharacterOfPosition(pos);
+
+          if (BANNED_RETURN_TYPES.has(typeName)) {
+            errors.push({
+              line: line + 1,
+              code: "PURETS",
+              message: `Function infers return type '${typeName}'. Functions must return a concrete data type.`,
+            });
+          }
+          if (typeName.startsWith("Promise")) {
+            errors.push({
+              line: line + 1,
+              code: "PURETS",
+              message: `Function infers return type '${typeName}'. Async/Promise types are not allowed.`,
+            });
           }
         }
       }

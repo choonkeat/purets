@@ -1,10 +1,9 @@
 type User = {
   name: string
-  age: number
 }
 
 function greet() {
   return this.name
 }
 
-const alice: User = { name: "Alice", age: 30 }
+const alice: User = { name: "Alice" }
