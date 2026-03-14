@@ -5,7 +5,7 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const datats = resolve(__dirname, "../datats.mjs");
+const purets = resolve(__dirname, "../purets.mjs");
 
 let passed = 0;
 let failed = 0;
@@ -24,13 +24,13 @@ function test(name, fn) {
 
 function check(fixture) {
   const file = resolve(__dirname, "fixtures", fixture);
-  return execSync(`node ${datats} check ${file}`, { encoding: "utf-8", stdio: "pipe" });
+  return execSync(`node ${purets} check ${file}`, { encoding: "utf-8", stdio: "pipe" });
 }
 
 function checkFails(fixture) {
   const file = resolve(__dirname, "fixtures", fixture);
   try {
-    execSync(`node ${datats} check ${file}`, { encoding: "utf-8", stdio: "pipe" });
+    execSync(`node ${purets} check ${file}`, { encoding: "utf-8", stdio: "pipe" });
     return null;
   } catch (err) {
     return (err.stdout || "") + (err.stderr || "");

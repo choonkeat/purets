@@ -7,7 +7,7 @@ export default defineConfig({
     baseURL: "http://localhost:3007",
   },
   webServer: {
-    command: "PORT=3007 node datats.mjs serve . --no-open",
+    command: "PORT=3007 node purets.mjs edit . --no-open",
     port: 3007,
     reuseExistingServer: false,
   },

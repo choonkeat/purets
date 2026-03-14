@@ -218,13 +218,14 @@ function validateAST(filePath) {
   return errors;
 }
 
-function checkTypes(filePath) {
+function checkTypes(filePath, extraTscOptions = {}) {
   const program = ts.createProgram([filePath], {
     strict: true,
     noEmit: true,
     target: ts.ScriptTarget.ES2020,
     moduleResolution: ts.ModuleResolutionKind.NodeJs,
     allowImportingTsExtensions: true,
+    ...extraTscOptions,
   });
 
   const checker = program.getTypeChecker();
@@ -260,14 +261,14 @@ function checkTypes(filePath) {
               if (BANNED_RETURN_TYPES.has(typeName)) {
                 errors.push({
                   line: line + 1,
-                  code: "DATATS",
+                  code: "PURETS",
                   message: `Arrow function infers return type '${typeName}'. Functions must return a concrete data type.`,
                 });
               }
               if (typeName.startsWith("Promise")) {
                 errors.push({
                   line: line + 1,
-                  code: "DATATS",
+                  code: "PURETS",
                   message: `Arrow function infers return type '${typeName}'. Async/Promise types are not allowed.`,
                 });
               }
@@ -281,7 +282,26 @@ function checkTypes(filePath) {
   return errors;
 }
 
-function check(filePath) {
+// Parse tsc flags from -- passthrough
+function parseTscFlags(flags) {
+  const options = {};
+  for (let i = 0; i < flags.length; i++) {
+    const flag = flags[i];
+    if (flag.startsWith("--")) {
+      const name = flag.slice(2);
+      // Boolean flags vs value flags
+      if (i + 1 < flags.length && !flags[i + 1].startsWith("--")) {
+        options[name] = flags[i + 1];
+        i++;
+      } else {
+        options[name] = true;
+      }
+    }
+  }
+  return options;
+}
+
+function check(filePath, extraTscOptions = {}) {
   const absPath = resolve(filePath);
 
   // Step 1: AST-based validation of .pure.ts subset constraints
@@ -296,7 +316,7 @@ function check(filePath) {
   }
 
   // Step 2: Type checking with inferred return type validation
-  const typeErrors = checkTypes(absPath);
+  const typeErrors = checkTypes(absPath, extraTscOptions);
   if (typeErrors.length > 0) {
     console.log("✗ Type errors found:\n");
     for (const err of typeErrors) {
@@ -309,24 +329,40 @@ function check(filePath) {
   }
 }
 
+const HELP = `purets — TypeScript subset for pure typed data
+
+Usage:
+  purets check <file.pure.ts> [-- <tsc flags>]   Type-check a .pure.ts file
+  purets edit [dir] [--port N] [--no-open]        Launch web editor
+
+Examples:
+  purets check data.pure.ts
+  purets check data.pure.ts -- --noUnusedLocals
+  purets edit
+  purets edit ./data --port 8080`;
+
 // CLI
-const args = process.argv.slice(2);
-if (args.length === 0 || args[0] === "--help") {
-  console.log("Usage:");
-  console.log("  datats check <file.pure.ts>   Type-check a .pure.ts file");
-  console.log("  datats serve [dir] [--port N]  Launch web editor");
-  console.log("  datats <dir>                   Launch web editor (shorthand)");
+const rawArgs = process.argv.slice(2);
+
+// Split on -- for tsc passthrough
+const dashDashIdx = rawArgs.indexOf("--");
+const args = dashDashIdx >= 0 ? rawArgs.slice(0, dashDashIdx) : rawArgs;
+const tscFlags = dashDashIdx >= 0 ? rawArgs.slice(dashDashIdx + 1) : [];
+
+if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
+  console.log(HELP);
   process.exit(0);
 }
 
 if (args[0] === "check" && args[1]) {
-  check(args[1]);
-} else if (args[0] === "serve" || (args.length >= 1 && !args[0].startsWith("-") && args[0] !== "check")) {
+  const extraTscOptions = parseTscFlags(tscFlags);
+  check(args[1], extraTscOptions);
+} else if (args[0] === "edit") {
   const serveScript = resolve(__dirname, "serve.mjs");
   const portIdx = args.indexOf("--port");
   const portVal = portIdx >= 0 ? args[portIdx + 1] : null;
   const noOpen = args.includes("--no-open");
-  const positional = args.filter((a, i) => a !== "serve" && a !== "--no-open" && a !== "--port" && (portIdx < 0 || i !== portIdx + 1));
+  const positional = args.filter((a, i) => a !== "edit" && a !== "--no-open" && a !== "--port" && (portIdx < 0 || i !== portIdx + 1));
   const dir = positional[0] || ".";
   const serveArgs = [resolve(dir)];
   if (portVal) serveArgs.push("--port", portVal);
@@ -335,9 +371,6 @@ if (args[0] === "check" && args[1]) {
     ex(`node ${serveScript} ${serveArgs.join(" ")}`, { stdio: "inherit" });
   });
 } else {
-  console.log("Usage:");
-  console.log("  datats check <file.pure.ts>   Type-check a .pure.ts file");
-  console.log("  datats serve [dir] [--port N]  Launch web editor");
-  console.log("  datats <dir>                   Launch web editor (shorthand)");
+  console.log(HELP);
   process.exit(1);
 }

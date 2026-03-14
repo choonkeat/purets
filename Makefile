@@ -1,4 +1,4 @@
-.PHONY: test test-e2e test-all check serve
+.PHONY: test test-e2e test-all check edit
 
 test:
 	@node test/run.mjs
@@ -9,7 +9,7 @@ test-e2e:
 test-all: test test-e2e
 
 check:
-	@node datats.mjs check $(FILE)
+	@node purets.mjs check $(FILE)
 
-serve:
-	@node datats.mjs serve .
+edit:
+	@node purets.mjs edit .
