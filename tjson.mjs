@@ -67,6 +67,79 @@ function parseTjson(content) {
   return { typeBlock, values };
 }
 
+// Keywords that are NOT allowed in the type block
+const DISALLOWED_TYPE_KEYWORDS = [
+  "function", "class", "interface", "const", "let", "var",
+  "import", "export", "return", "if", "else", "for", "while",
+  "do", "switch", "case", "break", "continue", "throw", "try",
+  "catch", "finally", "new", "delete", "typeof", "void", "yield",
+  "await", "async", "enum", "namespace", "module", "declare",
+  "abstract", "implements", "extends",
+];
+
+function validateTypeBlock(typeBlock) {
+  const errors = [];
+  const lines = typeBlock.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line === "" || line === "{" || line === "}") continue;
+
+    // Allow: type declarations, field definitions (name: type), and closing braces
+    // A line starting with `type ` is a type declaration
+    if (line.startsWith("type ")) continue;
+
+    // A field definition inside a type: `fieldName: TypeExpr` or `fieldName?: TypeExpr`
+    if (line.match(/^\w+\??\s*:\s*.+/)) continue;
+
+    // Allow standalone type expressions used in unions, intersections etc.
+    // e.g., `| "admin"` or `& { extra: string }`
+    if (line.match(/^[|&]/)) continue;
+
+    // Check for disallowed keywords at the start of a line
+    for (const kw of DISALLOWED_TYPE_KEYWORDS) {
+      if (line.startsWith(kw + " ") || line.startsWith(kw + "(") || line === kw) {
+        errors.push({ line: i + 1, message: `'${kw}' is not allowed in type definitions. Only 'type' declarations are permitted.` });
+        break;
+      }
+    }
+  }
+
+  return errors;
+}
+
+function validateValuesSection(valuesSection, typeBlockEndLine) {
+  const errors = [];
+  const lines = valuesSection.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line === "") continue;
+
+    // Allow: // TypeName comments
+    if (line.match(/^\/\/\s*.+/)) continue;
+
+    // Allow: JSON object/array literals and their contents
+    // (lines starting with {, }, [, ], or containing JSON key-value pairs)
+    if (line.match(/^[\[\]{}",\d\-]/) || line.match(/^"[^"]*"\s*:/) || line === "true" || line === "false" || line === "null") continue;
+
+    // Check for disallowed code
+    for (const kw of DISALLOWED_TYPE_KEYWORDS) {
+      if (line.startsWith(kw + " ") || line.startsWith(kw + "(") || line === kw) {
+        errors.push({ line: typeBlockEndLine + i + 1, message: `'${kw}' is not allowed. Only type-tagged JSON values are permitted outside the type block.` });
+        break;
+      }
+    }
+
+    // Check for type declarations outside the block comment
+    if (line.startsWith("type ")) {
+      errors.push({ line: typeBlockEndLine + i + 1, message: `'type' declarations must be inside the /* ... */ block comment.` });
+    }
+  }
+
+  return errors;
+}
+
 function generateTs(typeBlock, values) {
   let ts = typeBlock + "\n\n";
 
@@ -107,6 +180,23 @@ function check(filePath) {
   const content = readFileSync(absPath, "utf-8");
 
   const { typeBlock, values } = parseTjson(content);
+
+  // Validate that only type declarations and values are present
+  const typeErrors = validateTypeBlock(typeBlock);
+  const typeBlockMatch = content.match(/\/\*([\s\S]*?)\*\//);
+  const typeBlockEndLine = content.slice(0, typeBlockMatch.index + typeBlockMatch[0].length).split("\n").length;
+  const valuesSection = content.slice(typeBlockMatch.index + typeBlockMatch[0].length);
+  const valueErrors = validateValuesSection(valuesSection, typeBlockEndLine);
+
+  const validationErrors = [...typeErrors, ...valueErrors];
+  if (validationErrors.length > 0) {
+    console.log("✗ Invalid .tjson file:\n");
+    for (const err of validationErrors) {
+      console.log(`  Line ${err.line}: ${err.message}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
 
   if (values.length === 0) {
     console.log("⚠ No values found to check.");

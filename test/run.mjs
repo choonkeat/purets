@@ -108,6 +108,33 @@ test("wrong type in generic", () => {
   assert(out.includes("not assignable to type 'number'"), "Expected type error in generic data field");
 });
 
+console.log("\nDisallowed constructs (should reject):");
+
+test("function in type block", () => {
+  const out = checkFails("invalid-has-function.tjson");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("'function' is not allowed"), "Expected function rejection");
+});
+
+test("class in type block", () => {
+  const out = checkFails("invalid-has-class.tjson");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("'class' is not allowed"), "Expected class rejection");
+});
+
+test("interface in type block", () => {
+  const out = checkFails("invalid-has-interface.tjson");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("'interface' is not allowed"), "Expected interface rejection");
+});
+
+test("code in values section", () => {
+  const out = checkFails("invalid-code-in-values.tjson");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("'const' is not allowed"), "Expected const rejection");
+  assert(out.includes("'function' is not allowed"), "Expected function rejection");
+});
+
 // --- Summary ---
 console.log(`\n${passed + failed} tests, ${passed} passed, ${failed} failed\n`);
 process.exit(failed > 0 ? 1 : 0);

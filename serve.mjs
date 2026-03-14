@@ -120,6 +120,17 @@ const HTML = `<!DOCTYPE html>
     #status.error { color: #f44747; }
     #status.ok { color: #4ec9b0; }
     #save-hint { color: #666; font-size: 11px; margin-left: auto; }
+    #close-btn {
+      background: none;
+      border: none;
+      color: #888;
+      font-size: 16px;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 3px;
+      line-height: 1;
+    }
+    #close-btn:hover { background: #3c3c3c; color: #fff; }
 
     #editor-container {
       flex: 1;
@@ -146,6 +157,7 @@ const HTML = `<!DOCTYPE html>
       <span id="filename"></span>
       <span id="status"></span>
       <span id="save-hint">Ctrl+S to save</span>
+      <button id="close-btn" onclick="closeFile()" title="Close file">&times;</button>
     </div>
     <div id="editor-container" style="display:none"></div>
     <div id="welcome">Select a .tjson file to start editing</div>
@@ -170,6 +182,21 @@ const HTML = `<!DOCTYPE html>
         el.onclick = () => openFile(f);
         list.appendChild(el);
       });
+    }
+
+    function closeFile() {
+      if (isDirty && !confirm('Unsaved changes. Discard?')) return;
+      if (editor) {
+        const oldModel = editor.getModel();
+        if (oldModel) oldModel.dispose();
+        editor.setModel(null);
+      }
+      currentFile = null;
+      isDirty = false;
+      document.querySelectorAll('.file-item').forEach(el => el.classList.remove('active'));
+      document.getElementById('toolbar').style.display = 'none';
+      document.getElementById('editor-container').style.display = 'none';
+      document.getElementById('welcome').style.display = 'flex';
     }
 
     async function openFile(name) {
@@ -325,6 +352,51 @@ const HTML = `<!DOCTYPE html>
       return '/*\\n  ' + typeBlock.split('\\n').join('\\n  ') + '\\n*/\\n\\n' + values + '\\n';
     }
 
+    const DISALLOWED_KEYWORDS = [
+      'function', 'class', 'interface', 'const', 'let', 'var',
+      'import', 'export', 'return', 'if', 'else', 'for', 'while',
+      'do', 'switch', 'case', 'break', 'continue', 'throw', 'try',
+      'catch', 'finally', 'new', 'delete', 'typeof', 'void', 'yield',
+      'await', 'async', 'enum', 'namespace', 'module', 'declare',
+      'abstract', 'implements', 'extends',
+    ];
+
+    function validateTjsonContent(model) {
+      const content = model.getValue();
+      const lines = content.split('\\n');
+      const customMarkers = [];
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line === '' || line.startsWith('//')) continue;
+
+        // Allow: type declarations, field definitions, const _vN assignments (our generated code)
+        if (line.startsWith('type ')) continue;
+        if (line.match(/^\\w+\\??\\s*:\\s*.+/)) continue;
+        if (line.match(/^const _v\\d+:/)) continue;
+        if (line.match(/^[|&{}\\/\\[\\]",\\d\\-]/) || line === 'true' || line === 'false' || line === 'null') continue;
+
+        for (const kw of DISALLOWED_KEYWORDS) {
+          if (line.startsWith(kw + ' ') || line.startsWith(kw + '(') || line === kw) {
+            customMarkers.push({
+              severity: monaco.MarkerSeverity.Error,
+              message: "'" + kw + "' is not allowed in typed-json. Only type declarations and JSON values are permitted.",
+              startLineNumber: i + 1,
+              startColumn: 1,
+              endLineNumber: i + 1,
+              endColumn: lines[i].length + 1,
+            });
+            break;
+          }
+        }
+      }
+
+      // Merge with existing TS markers
+      const existingMarkers = monaco.editor.getModelMarkers({ resource: model.uri })
+        .filter(m => m.owner !== 'tjson-validator');
+      monaco.editor.setModelMarkers(model, 'tjson-validator', customMarkers);
+    }
+
     // Initialize Monaco
     require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
     require(['vs/editor/editor.main'], function () {
@@ -357,11 +429,12 @@ const HTML = `<!DOCTYPE html>
         isDirty = true;
         setStatus('', 'Modified');
 
-        // Check errors after a delay
+        // Run custom tjson validation + check TS errors after a delay
         clearTimeout(editor._errorCheck);
         editor._errorCheck = setTimeout(() => {
-          const markers = monaco.editor.getModelMarkers({ resource: editor.getModel().uri });
-          const errors = markers.filter(m => m.severity === monaco.MarkerSeverity.Error);
+          validateTjsonContent(editor.getModel());
+          const allMarkers = monaco.editor.getModelMarkers({ resource: editor.getModel().uri });
+          const errors = allMarkers.filter(m => m.severity === monaco.MarkerSeverity.Error);
           if (errors.length > 0) {
             setStatus('error', errors.length + ' error(s)');
           } else {

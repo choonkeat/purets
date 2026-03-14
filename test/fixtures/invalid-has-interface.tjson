@@ -1,0 +1,9 @@
+/*
+  interface User {
+    name: string
+    age: number
+  }
+*/
+
+// User
+{ "name": "Alice", "age": 30 }
