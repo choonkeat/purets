@@ -2,7 +2,7 @@
 
 import { createServer } from "http";
 import { readFileSync, writeFileSync, readdirSync, statSync } from "fs";
-import { resolve, join, extname } from "path";
+import { resolve, join } from "path";
 import { exec } from "child_process";
 import { platform } from "os";
 
@@ -17,10 +17,10 @@ const port = parseInt(portFlag || process.env.PORT || "3000");
 
 function openBrowser(url) {
   const cmd = platform() === "darwin" ? "open" : platform() === "win32" ? "start" : "xdg-open";
-  exec(`${cmd} ${url}`, () => {}); // fire and forget
+  exec(`${cmd} ${url}`, () => {});
 }
 
-function findTjsonFiles(baseDir) {
+function findDataTsFiles(baseDir) {
   const files = [];
   function walk(d, prefix = "") {
     for (const entry of readdirSync(d)) {
@@ -28,7 +28,7 @@ function findTjsonFiles(baseDir) {
       const rel = prefix ? `${prefix}/${entry}` : entry;
       if (statSync(full).isDirectory() && entry !== "node_modules" && entry !== ".git") {
         walk(full, rel);
-      } else if (entry.endsWith(".tjson")) {
+      } else if (entry.endsWith(".data.ts")) {
         files.push(rel);
       }
     }
@@ -37,25 +37,12 @@ function findTjsonFiles(baseDir) {
   return files.sort();
 }
 
-function parseTjsonForEditor(content) {
-  const typeBlockMatch = content.match(/\/\*([\s\S]*?)\*\//);
-  if (!typeBlockMatch) return { typeBlock: "", values: content };
-
-  const typeBlock = typeBlockMatch[1]
-    .split("\n")
-    .map((line) => line.replace(/^\s*/, ""))
-    .join("\n")
-    .trim();
-
-  return { typeBlock };
-}
-
 const HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>typed-json</title>
+  <title>datats</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1e1e1e; color: #ccc; display: flex; height: 100vh; }
@@ -84,14 +71,44 @@ const HTML = `<!DOCTYPE html>
       padding: 4px 0;
     }
 
+    .tree-folder {
+      user-select: none;
+    }
+    .tree-label {
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: 13px;
+      color: #ccc;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .tree-label:hover { background: #2a2d2e; }
+    .tree-icon {
+      flex-shrink: 0;
+      font-size: 13px;
+    }
+    .tree-folder.collapsed > .tree-children { display: none; }
+    .tree-folder.collapsed > .tree-label > .tree-icon::before { content: '\\1F4C1'; }
+    .tree-folder:not(.collapsed) > .tree-label > .tree-icon::before { content: '\\1F4C2'; }
+    .tree-children {
+      margin-left: 8px;
+      padding-left: 12px;
+      border-left: 1px solid #3c3c3c;
+    }
+    .file-icon::before { content: '\\1F4C4'; }
+    .file-icon { flex-shrink: 0; font-size: 12px; }
     .file-item {
-      padding: 6px 16px;
+      padding: 4px 8px;
       cursor: pointer;
       font-size: 13px;
       color: #ccc;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      display: flex;
+      align-items: center;
+      gap: 4px;
     }
 
     .file-item:hover { background: #2a2d2e; }
@@ -149,7 +166,7 @@ const HTML = `<!DOCTYPE html>
 </head>
 <body>
   <div id="sidebar">
-    <h2>typed-json files</h2>
+    <h2>.data.ts files</h2>
     <div id="file-list"></div>
   </div>
   <div id="main">
@@ -160,7 +177,7 @@ const HTML = `<!DOCTYPE html>
       <button id="close-btn" onclick="closeFile()" title="Close file">&times;</button>
     </div>
     <div id="editor-container" style="display:none"></div>
-    <div id="welcome">Select a .tjson file to start editing</div>
+    <div id="welcome">Select a .data.ts file to start editing</div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
@@ -171,19 +188,62 @@ const HTML = `<!DOCTYPE html>
     let currentFile = null;
     let isDirty = false;
 
-    // Load file list
     async function loadFiles() {
       const res = await fetch('/api/files');
       const files = await res.json();
+
+      // Build tree structure from flat paths
+      const tree = {};
+      files.forEach(f => {
+        const parts = f.split('/');
+        let node = tree;
+        for (let i = 0; i < parts.length - 1; i++) {
+          if (!node[parts[i]]) node[parts[i]] = {};
+          node = node[parts[i]];
+        }
+        node[parts[parts.length - 1]] = f; // leaf = full path
+      });
+
       const list = document.getElementById('file-list');
       list.innerHTML = '';
-      files.forEach(f => {
-        const el = document.createElement('div');
-        el.className = 'file-item';
-        el.textContent = f;
-        el.onclick = () => openFile(f);
-        list.appendChild(el);
+      renderTree(tree, list, '');
+    }
+
+    function renderTree(node, parent, prefix) {
+      const entries = Object.keys(node).sort((a, b) => {
+        const aIsDir = typeof node[a] === 'object';
+        const bIsDir = typeof node[b] === 'object';
+        if (aIsDir && !bIsDir) return -1;
+        if (!aIsDir && bIsDir) return 1;
+        return a.localeCompare(b);
       });
+
+      for (const key of entries) {
+        if (typeof node[key] === 'object') {
+          // Folder
+          const folder = document.createElement('div');
+          folder.className = 'tree-folder';
+          const label = document.createElement('div');
+          label.className = 'tree-label';
+          label.innerHTML = '<span class="tree-icon"></span> ' + key;
+          label.onclick = () => folder.classList.toggle('collapsed');
+          folder.appendChild(label);
+
+          const children = document.createElement('div');
+          children.className = 'tree-children';
+          renderTree(node[key], children, prefix + key + '/');
+          folder.appendChild(children);
+          parent.appendChild(folder);
+        } else {
+          // File
+          const el = document.createElement('div');
+          el.className = 'file-item';
+          el.innerHTML = '<span class="file-icon"></span> ' + key;
+          el.dataset.path = node[key];
+          el.onclick = () => openFile(node[key]);
+          parent.appendChild(el);
+        }
+      }
     }
 
     function closeFile() {
@@ -210,12 +270,10 @@ const HTML = `<!DOCTYPE html>
       currentFile = name;
       isDirty = false;
 
-      // Update sidebar selection
       document.querySelectorAll('.file-item').forEach(el => {
-        el.classList.toggle('active', el.textContent === name);
+        el.classList.toggle('active', el.dataset.path === name);
       });
 
-      // Show editor
       document.getElementById('welcome').style.display = 'none';
       document.getElementById('toolbar').style.display = 'flex';
       document.getElementById('editor-container').style.display = 'block';
@@ -223,84 +281,20 @@ const HTML = `<!DOCTYPE html>
       setStatus('ok', 'Ready');
 
       if (editor) {
-        // Dispose old model first to free the URI
         const oldModel = editor.getModel();
         if (oldModel) oldModel.dispose();
 
-        // Set content as TypeScript for type checking
-        const tsContent = buildTsContent(data.content);
-        const uri = monaco.Uri.parse('file:///' + name.replace(/\\//g, '_').replace(/\\.tjson$/, '.ts'));
-        const model = monaco.editor.createModel(tsContent, 'typescript', uri);
+        // .data.ts files are valid TypeScript — load directly!
+        const uri = monaco.Uri.parse('file:///' + name.replace(/\\//g, '_'));
+        const model = monaco.editor.createModel(data.content, 'typescript', uri);
         editor.setModel(model);
 
-        // Store raw content for save
-        editor._tjsonRaw = data.content;
-        editor._tjsonTypeBlock = data.typeBlock;
-
-        // Run validation and check errors after TS diagnostics settle
+        // Check errors after TS diagnostics settle
         setTimeout(() => {
-          validateTjsonContent(model);
-          const allMarkers = monaco.editor.getModelMarkers({ resource: model.uri });
-          const errors = allMarkers.filter(m => m.severity === monaco.MarkerSeverity.Error);
-          if (errors.length > 0) {
-            setStatus('error', errors.length + ' error(s)');
-          } else {
-            setStatus('ok', 'No errors');
-          }
+          validateDataTs(model);
+          updateStatus();
         }, 2000);
       }
-    }
-
-    function buildTsContent(tjsonContent) {
-      // Extract type block and values, reconstruct as TS
-      const typeMatch = tjsonContent.match(/\\/\\*([\\s\\S]*?)\\*\\//);
-      if (!typeMatch) return tjsonContent;
-
-      const typeBlock = typeMatch[1]
-        .split('\\n')
-        .map(l => l.replace(/^\\s*/, ''))
-        .join('\\n')
-        .trim();
-
-      const afterTypes = tjsonContent.slice(typeMatch.index + typeMatch[0].length);
-
-      // Parse values
-      const lines = afterTypes.split('\\n');
-      let tsValues = '';
-      let valueIdx = 0;
-      let i = 0;
-
-      while (i < lines.length) {
-        const commentMatch = lines[i].match(/^\\s*\\/\\/\\s*(.+?)\\s*$/);
-        if (commentMatch) {
-          const typeName = commentMatch[1];
-          i++;
-          let jsonLines = [];
-          let braceDepth = 0;
-          let started = false;
-
-          while (i < lines.length) {
-            const line = lines[i];
-            if (!started && line.trim() === '') { i++; continue; }
-            for (const ch of line) {
-              if (ch === '{' || ch === '[') { braceDepth++; started = true; }
-              if (ch === '}' || ch === ']') braceDepth--;
-            }
-            jsonLines.push(line);
-            i++;
-            if (started && braceDepth === 0) break;
-          }
-
-          if (jsonLines.length > 0) {
-            tsValues += '\\nconst _v' + valueIdx + ': ' + typeName + ' = ' + jsonLines.join('\\n').trim() + '\\n';
-            valueIdx++;
-          }
-        } else {
-          i++;
-        }
-      }
-
-      return typeBlock + '\\n' + tsValues;
     }
 
     function setStatus(cls, text) {
@@ -309,65 +303,40 @@ const HTML = `<!DOCTYPE html>
       el.textContent = text;
     }
 
+    function updateStatus() {
+      const model = editor?.getModel();
+      if (!model) return;
+      const allMarkers = monaco.editor.getModelMarkers({ resource: model.uri });
+      const errors = allMarkers.filter(m => m.severity === monaco.MarkerSeverity.Error);
+      if (errors.length > 0) {
+        setStatus('error', errors.length + ' error(s)');
+      } else {
+        setStatus('ok', 'No errors');
+      }
+    }
+
     async function saveFile() {
       if (!currentFile || !editor) return;
 
-      // Reconstruct tjson from the TS content
-      // We need to map back from TS to tjson format
-      const tsContent = editor.getValue();
-      const tjsonContent = rebuildTjson(tsContent);
-
+      const content = editor.getValue();
       const res = await fetch('/api/file', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: currentFile, content: tjsonContent })
+        body: JSON.stringify({ name: currentFile, content })
       });
 
       if (res.ok) {
         isDirty = false;
         setStatus('ok', 'Saved');
-        setTimeout(() => {
-          // Check for errors
-          const markers = monaco.editor.getModelMarkers({ resource: editor.getModel().uri });
-          const errors = markers.filter(m => m.severity === monaco.MarkerSeverity.Error);
-          if (errors.length > 0) {
-            setStatus('error', errors.length + ' error(s)');
-          } else {
-            setStatus('ok', 'No errors');
-          }
-        }, 500);
+        setTimeout(updateStatus, 500);
       } else {
         setStatus('error', 'Save failed');
       }
     }
 
-    function rebuildTjson(tsContent) {
-      // Split into type definitions and const assignments
-      const lines = tsContent.split('\\n');
-      let typeLines = [];
-      let valueLines = [];
-      let inValues = false;
-
-      for (const line of lines) {
-        const constMatch = line.match(/^const _v\\d+:\\s*(.+?)\\s*=\\s*(.*)$/);
-        if (constMatch) {
-          inValues = true;
-          valueLines.push('// ' + constMatch[1]);
-          valueLines.push(constMatch[2]);
-          valueLines.push('');
-        } else if (!inValues) {
-          typeLines.push(line);
-        }
-      }
-
-      const typeBlock = typeLines.join('\\n').trim();
-      const values = valueLines.join('\\n').trim();
-
-      return '/*\\n  ' + typeBlock.split('\\n').join('\\n  ') + '\\n*/\\n\\n' + values + '\\n';
-    }
-
+    // datats subset validator — disallow non-type, non-const constructs
     const DISALLOWED_KEYWORDS = [
-      'function', 'class', 'interface', 'const', 'let', 'var',
+      'function', 'class', 'interface', 'let', 'var',
       'import', 'export', 'return', 'if', 'else', 'for', 'while',
       'do', 'switch', 'case', 'break', 'continue', 'throw', 'try',
       'catch', 'finally', 'new', 'delete', 'typeof', 'void', 'yield',
@@ -375,26 +344,37 @@ const HTML = `<!DOCTYPE html>
       'abstract', 'implements', 'extends',
     ];
 
-    function validateTjsonContent(model) {
+    function validateDataTs(model) {
       const content = model.getValue();
       const lines = content.split('\\n');
       const customMarkers = [];
+      let inTypeBlock = false;
+      let braceDepth = 0;
 
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
-        if (line === '' || line.startsWith('//')) continue;
+        if (line === '' || line.startsWith('//') || line.startsWith('/*') || line.startsWith('*') || line.startsWith('*/')) continue;
 
-        // Allow: type declarations, field definitions, const _vN assignments (our generated code)
+        // Track type body braces
+        if (line.startsWith('type ') && line.includes('{')) inTypeBlock = true;
+        for (const ch of line) {
+          if (ch === '{') braceDepth++;
+          if (ch === '}') braceDepth--;
+        }
+        if (inTypeBlock && braceDepth === 0) { inTypeBlock = false; continue; }
+        if (inTypeBlock) continue;
+
+        // Allow: type declarations, const with type annotation, closing braces, object/array contents
         if (line.startsWith('type ')) continue;
-        if (line.match(/^\\w+\\??\\s*:\\s*.+/)) continue;
-        if (line.match(/^const _v\\d+:/)) continue;
-        if (line.match(/^[|&{}\\/\\[\\]",\\d\\-]/) || line === 'true' || line === 'false' || line === 'null') continue;
+        if (line.startsWith('const ') && line.includes(':')) continue;
+        if (line === '}') continue;
+        if (line.match(/^[|&{}\\/\\[\\]",\\d\\-]/) || line.match(/^\\w+\\??\\s*:/) || line === 'true' || line === 'false' || line === 'null') continue;
 
         for (const kw of DISALLOWED_KEYWORDS) {
-          if (line.startsWith(kw + ' ') || line.startsWith(kw + '(') || line === kw) {
+          if (line.startsWith(kw + ' ') || line.startsWith(kw + '(') || line.startsWith(kw + '{') || line === kw) {
             customMarkers.push({
               severity: monaco.MarkerSeverity.Error,
-              message: "'" + kw + "' is not allowed in typed-json. Only type declarations and JSON values are permitted.",
+              message: "'" + kw + "' is not allowed in .data.ts files. Only type declarations and const values are permitted.",
               startLineNumber: i + 1,
               startColumn: 1,
               endLineNumber: i + 1,
@@ -405,16 +385,12 @@ const HTML = `<!DOCTYPE html>
         }
       }
 
-      // Merge with existing TS markers
-      const existingMarkers = monaco.editor.getModelMarkers({ resource: model.uri })
-        .filter(m => m.owner !== 'tjson-validator');
-      monaco.editor.setModelMarkers(model, 'tjson-validator', customMarkers);
+      monaco.editor.setModelMarkers(model, 'datats-validator', customMarkers);
     }
 
     // Initialize Monaco
     require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
     require(['vs/editor/editor.main'], function () {
-      // Configure TypeScript
       monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
         target: monaco.languages.typescript.ScriptTarget.ES2020,
         strict: true,
@@ -445,21 +421,13 @@ const HTML = `<!DOCTYPE html>
         isDirty = true;
         setStatus('', 'Modified');
 
-        // Run custom tjson validation + check TS errors after a delay
         clearTimeout(editor._errorCheck);
         editor._errorCheck = setTimeout(() => {
-          validateTjsonContent(editor.getModel());
-          const allMarkers = monaco.editor.getModelMarkers({ resource: editor.getModel().uri });
-          const errors = allMarkers.filter(m => m.severity === monaco.MarkerSeverity.Error);
-          if (errors.length > 0) {
-            setStatus('error', errors.length + ' error(s)');
-          } else {
-            setStatus('ok', 'No errors (modified)');
-          }
+          validateDataTs(editor.getModel());
+          updateStatus();
         }, 1000);
       });
 
-      // Ctrl+S to save
       editor.addAction({
         id: 'save-file',
         label: 'Save File',
@@ -483,7 +451,7 @@ const server = createServer((req, res) => {
   }
 
   if (url.pathname === "/api/files") {
-    const files = findTjsonFiles(dir);
+    const files = findDataTsFiles(dir);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(files));
     return;
@@ -498,9 +466,8 @@ const server = createServer((req, res) => {
     }
     try {
       const content = readFileSync(join(dir, name), "utf-8");
-      const { typeBlock } = parseTjsonForEditor(content);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ content, typeBlock }));
+      res.end(JSON.stringify({ content }));
     } catch {
       res.writeHead(404);
       res.end("Not found");
@@ -536,7 +503,7 @@ const server = createServer((req, res) => {
 
 server.listen(port, () => {
   const url = `http://localhost:${port}`;
-  console.log(`\n  typed-json editor`);
+  console.log(`\n  datats editor`);
   console.log(`  Serving: ${dir}`);
   console.log(`  Open: ${url}\n`);
   if (!noOpen) openBrowser(url);

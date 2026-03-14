@@ -9,7 +9,7 @@ test-e2e:
 test-all: test test-e2e
 
 check:
-	@node tjson.mjs check $(FILE)
+	@node datats.mjs check $(FILE)
 
 serve:
-	@node tjson.mjs serve .
+	@node datats.mjs serve .

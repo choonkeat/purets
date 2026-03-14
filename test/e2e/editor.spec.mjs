@@ -13,49 +13,39 @@ test.describe("File Navigation", () => {
   test("shows welcome message initially", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator("#welcome")).toBeVisible();
-    await expect(page.locator("#welcome")).toContainText("Select a .tjson file");
+    await expect(page.locator("#welcome")).toContainText("Select a .data.ts file");
   });
 
   test("clicking a file opens it in the editor", async ({ page }) => {
     await page.goto("/");
-    // Wait for Monaco to load
     await page.waitForFunction(() => typeof window.monaco !== "undefined", null, { timeout: 15000 });
 
-    // Click a valid file
-    const fileItem = page.locator(".file-item", { hasText: "valid-basic.tjson" });
+    const fileItem = page.locator(".file-item", { hasText: "valid-basic.data.ts" });
     await fileItem.click();
 
-    // Welcome should be hidden, editor visible
     await expect(page.locator("#welcome")).toBeHidden();
     await expect(page.locator("#editor-container")).toBeVisible();
-    await expect(page.locator("#filename")).toContainText("valid-basic.tjson");
+    await expect(page.locator("#filename")).toContainText("valid-basic.data.ts");
 
-    // Editor should have content (check Monaco has text)
-    const editorContent = await page.evaluate(() => {
-      return window.editor?.getValue() || "";
-    });
+    const editorContent = await page.evaluate(() => window.editor?.getValue() || "");
     expect(editorContent).toContain("type");
+    expect(editorContent).toContain("const");
   });
 
   test("clicking a different file switches content", async ({ page }) => {
     await page.goto("/");
     await page.waitForFunction(() => typeof window.monaco !== "undefined", null, { timeout: 15000 });
 
-    // Open first file
-    await page.locator(".file-item", { hasText: "valid-basic.tjson" }).click();
+    await page.locator(".file-item", { hasText: "valid-basic.data.ts" }).click();
     await page.waitForTimeout(500);
     const content1 = await page.evaluate(() => window.editor?.getValue() || "");
 
-    // Open different file
-    await page.locator(".file-item", { hasText: "valid-unions.tjson" }).click();
+    await page.locator(".file-item", { hasText: "valid-unions.data.ts" }).click();
     await page.waitForTimeout(500);
     const content2 = await page.evaluate(() => window.editor?.getValue() || "");
 
-    // Content should be different
     expect(content1).not.toEqual(content2);
-    await expect(page.locator("#filename")).toContainText("valid-unions.tjson");
-
-    // The unions file should have Role type
+    await expect(page.locator("#filename")).toContainText("valid-unions.data.ts");
     expect(content2).toContain("Role");
   });
 
@@ -63,20 +53,14 @@ test.describe("File Navigation", () => {
     await page.goto("/");
     await page.waitForFunction(() => typeof window.monaco !== "undefined", null, { timeout: 15000 });
 
-    // Open a file
-    await page.locator(".file-item", { hasText: "valid-basic.tjson" }).click();
+    await page.locator(".file-item", { hasText: "valid-basic.data.ts" }).click();
     await expect(page.locator("#editor-container")).toBeVisible();
 
-    // Click close
     await page.locator("#close-btn").click();
 
-    // Should return to welcome
     await expect(page.locator("#welcome")).toBeVisible();
     await expect(page.locator("#editor-container")).toBeHidden();
-
-    // No file should be selected in sidebar
-    const activeItems = page.locator(".file-item.active");
-    await expect(activeItems).toHaveCount(0);
+    await expect(page.locator(".file-item.active")).toHaveCount(0);
   });
 });
 
@@ -85,13 +69,10 @@ test.describe("Type Checking", () => {
     await page.goto("/");
     await page.waitForFunction(() => typeof window.monaco !== "undefined", null, { timeout: 15000 });
 
-    await page.locator(".file-item", { hasText: "valid-basic.tjson" }).click();
+    await page.locator(".file-item", { hasText: "valid-basic.data.ts" }).click();
 
-    // Wait for TS diagnostics to settle
     await page.waitForTimeout(2000);
-
     const status = page.locator("#status");
-    // Should eventually show ok (no errors)
     await expect(status).toHaveClass(/ok/, { timeout: 10000 });
   });
 
@@ -99,9 +80,8 @@ test.describe("Type Checking", () => {
     await page.goto("/");
     await page.waitForFunction(() => typeof window.monaco !== "undefined", null, { timeout: 15000 });
 
-    await page.locator(".file-item", { hasText: "invalid-wrong-type.tjson" }).click();
+    await page.locator(".file-item", { hasText: "invalid-wrong-type.data.ts" }).click();
 
-    // Wait for TS diagnostics + our status update (2s delay after open)
     const status = page.locator("#status");
     await expect(status).toHaveClass(/error/, { timeout: 15000 });
     const text = await status.textContent();
@@ -112,18 +92,15 @@ test.describe("Type Checking", () => {
     await page.goto("/");
     await page.waitForFunction(() => typeof window.monaco !== "undefined", null, { timeout: 15000 });
 
-    await page.locator(".file-item", { hasText: "invalid-missing-field.tjson" }).click();
+    await page.locator(".file-item", { hasText: "invalid-missing-field.data.ts" }).click();
 
-    // Wait for TS diagnostics, then check markers directly
     await page.waitForTimeout(3000);
-
     const errorCount = await page.evaluate(() => {
       const model = window.editor?.getModel();
       if (!model) return 0;
       const markers = window.monaco.editor.getModelMarkers({ resource: model.uri });
       return markers.filter(m => m.severity === window.monaco.MarkerSeverity.Error).length;
     });
-
     expect(errorCount).toBeGreaterThan(0);
   });
 
@@ -131,19 +108,15 @@ test.describe("Type Checking", () => {
     await page.goto("/");
     await page.waitForFunction(() => typeof window.monaco !== "undefined", null, { timeout: 15000 });
 
-    await page.locator(".file-item", { hasText: "invalid-wrong-type.tjson" }).click();
+    await page.locator(".file-item", { hasText: "invalid-wrong-type.data.ts" }).click();
 
-    // Wait for markers to be set
     await page.waitForTimeout(3000);
-
-    // Check that Monaco has error markers
     const errorCount = await page.evaluate(() => {
       const model = window.editor?.getModel();
       if (!model) return 0;
       const markers = window.monaco.editor.getModelMarkers({ resource: model.uri });
       return markers.filter(m => m.severity === window.monaco.MarkerSeverity.Error).length;
     });
-
     expect(errorCount).toBeGreaterThan(0);
   });
 });

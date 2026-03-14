@@ -1,11 +1,8 @@
-/*
-  type User = {
-    name: string
-  }
-*/
+type User = {
+  name: string
+}
 
-// User
-{ "name": "Alice" }
+const alice: User = { name: "Alice" }
 
 if (true) { console.log("hi") }
 for (let i = 0; i < 10; i++) {}
