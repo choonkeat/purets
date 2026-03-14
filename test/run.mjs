@@ -46,27 +46,27 @@ function assert(condition, msg) {
 console.log("\nValid files (should pass):");
 
 test("basic types", () => {
-  const out = check("valid-basic.data.ts");
+  const out = check("valid-basic.pure.ts");
   assert(out.includes("All values type-check successfully"), "Expected success message");
 });
 
 test("union types and arrays", () => {
-  const out = check("valid-unions.data.ts");
+  const out = check("valid-unions.pure.ts");
   assert(out.includes("All values type-check successfully"), "Expected success message");
 });
 
 test("optional fields", () => {
-  const out = check("valid-optional.data.ts");
+  const out = check("valid-optional.pure.ts");
   assert(out.includes("All values type-check successfully"), "Expected success message");
 });
 
 test("nested arrays and tuples", () => {
-  const out = check("valid-nested-arrays.data.ts");
+  const out = check("valid-nested-arrays.pure.ts");
   assert(out.includes("All values type-check successfully"), "Expected success message");
 });
 
 test("generic types", () => {
-  const out = check("valid-generics.data.ts");
+  const out = check("valid-generics.pure.ts");
   assert(out.includes("All values type-check successfully"), "Expected success message");
 });
 
@@ -75,37 +75,37 @@ test("generic types", () => {
 console.log("\nInvalid files (should fail with correct errors):");
 
 test("wrong type (string instead of number)", () => {
-  const out = checkFails("invalid-wrong-type.data.ts");
+  const out = checkFails("invalid-wrong-type.pure.ts");
   assert(out !== null, "Expected type check to fail");
   assert(out.includes("not assignable to type 'number'"), "Expected number type error");
 });
 
 test("missing required field", () => {
-  const out = checkFails("invalid-missing-field.data.ts");
+  const out = checkFails("invalid-missing-field.pure.ts");
   assert(out !== null, "Expected type check to fail");
   assert(out.includes("email"), "Expected error about missing 'email' field");
 });
 
 test("invalid union value", () => {
-  const out = checkFails("invalid-bad-union.data.ts");
+  const out = checkFails("invalid-bad-union.pure.ts");
   assert(out !== null, "Expected type check to fail");
   assert(out.includes("deleted"), `Expected error mentioning 'deleted', got: ${out}`);
 });
 
 test("optional field with wrong type", () => {
-  const out = checkFails("invalid-optional-wrong-type.data.ts");
+  const out = checkFails("invalid-optional-wrong-type.pure.ts");
   assert(out !== null, "Expected type check to fail");
   assert(out.includes("not assignable to type 'string'"), "Expected string type error for email");
 });
 
 test("wrong type in nested array", () => {
-  const out = checkFails("invalid-nested-array.data.ts");
+  const out = checkFails("invalid-nested-array.pure.ts");
   assert(out !== null, "Expected type check to fail");
   assert(out.includes("not assignable to type 'number'"), "Expected number type error in nested object");
 });
 
 test("wrong type in generic", () => {
-  const out = checkFails("invalid-generic.data.ts");
+  const out = checkFails("invalid-generic.pure.ts");
   assert(out !== null, "Expected type check to fail");
   assert(out.includes("not assignable to type 'number'"), "Expected type error in generic data field");
 });
@@ -115,71 +115,97 @@ test("wrong type in generic", () => {
 console.log("\nDisallowed constructs (should reject):");
 
 test("function in file", () => {
-  const out = checkFails("invalid-has-function.data.ts");
+  const out = checkFails("invalid-has-function.pure.ts");
   assert(out !== null, "Expected validation to fail");
   assert(out.includes("function") && out.includes("not allowed"), "Expected function rejection");
 });
 
 test("class in file", () => {
-  const out = checkFails("invalid-has-class.data.ts");
+  const out = checkFails("invalid-has-class.pure.ts");
   assert(out !== null, "Expected validation to fail");
   assert(out.includes("'class' is not allowed"), "Expected class rejection");
 });
 
 test("interface in file", () => {
-  const out = checkFails("invalid-has-interface.data.ts");
+  const out = checkFails("invalid-has-interface.pure.ts");
   assert(out !== null, "Expected validation to fail");
   assert(out.includes("'interface' is not allowed"), "Expected interface rejection");
 });
 
 test("let/var/function in file", () => {
-  const out = checkFails("invalid-code-in-values.data.ts");
+  const out = checkFails("invalid-code-in-values.pure.ts");
   assert(out !== null, "Expected validation to fail");
   assert(out.includes("let") && out.includes("not allowed"), "Expected let rejection");
   assert(out.includes("function") && out.includes("not allowed"), "Expected function rejection");
 });
 
-test("import in file", () => {
-  const out = checkFails("invalid-has-import.data.ts");
+test("import from non-pure module", () => {
+  const out = checkFails("invalid-has-import.pure.ts");
   assert(out !== null, "Expected validation to fail");
-  assert(out.includes("'import' is not allowed"), "Expected import rejection");
+  assert(out.includes("not a .pure.ts module"), "Expected non-pure import rejection");
 });
 
 test("enum in file", () => {
-  const out = checkFails("invalid-has-enum.data.ts");
+  const out = checkFails("invalid-has-enum.pure.ts");
   assert(out !== null, "Expected validation to fail");
   assert(out.includes("'enum' is not allowed"), "Expected enum rejection");
 });
 
 test("let/var in file", () => {
-  const out = checkFails("invalid-has-let.data.ts");
+  const out = checkFails("invalid-has-let.pure.ts");
   assert(out !== null, "Expected validation to fail");
   assert(out.includes("'let' is not allowed"), "Expected let rejection");
   assert(out.includes("'var' is not allowed"), "Expected var rejection");
 });
 
 test("control flow in file", () => {
-  const out = checkFails("invalid-has-control-flow.data.ts");
+  const out = checkFails("invalid-has-control-flow.pure.ts");
   assert(out !== null, "Expected validation to fail");
   assert(out.includes("Control flow") && out.includes("not allowed"), "Expected control flow rejection");
 });
 
-test("export in file", () => {
-  const out = checkFails("invalid-has-export.data.ts");
+test("export default banned", () => {
+  const out = checkFails("invalid-has-export.pure.ts");
   assert(out !== null, "Expected validation to fail");
-  assert(out.includes("'export' is not allowed"), "Expected export rejection");
+  assert(out.includes("export default") && out.includes("not allowed"), "Expected default export rejection");
 });
 
 test("declare in file", () => {
-  const out = checkFails("invalid-has-declare.data.ts");
+  const out = checkFails("invalid-has-declare.pure.ts");
   assert(out !== null, "Expected validation to fail");
   assert(out.includes("'declare' is not allowed"), "Expected declare rejection");
 });
 
 test("namespace in file", () => {
-  const out = checkFails("invalid-has-namespace.data.ts");
+  const out = checkFails("invalid-has-namespace.pure.ts");
   assert(out !== null, "Expected validation to fail");
   assert(out.includes("namespace") && out.includes("not allowed"), "Expected namespace rejection");
+});
+
+// --- Imports and exports ---
+
+console.log("\nImports and exports:");
+
+test("named exports allowed", () => {
+  const out = check("valid-with-exports.pure.ts");
+  assert(out.includes("All values type-check successfully"), "Expected success");
+});
+
+test("import from .pure.ts allowed", () => {
+  const out = check("valid-with-import.pure.ts");
+  assert(out.includes("All values type-check successfully"), "Expected success");
+});
+
+test("import from non-.pure.ts banned", () => {
+  const out = checkFails("invalid-import-non-pure.pure.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("not a .pure.ts module"), "Expected non-pure import rejection");
+});
+
+test("default import banned", () => {
+  const out = checkFails("invalid-default-import.pure.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("Default import") && out.includes("not allowed"), "Expected default import rejection");
 });
 
 // --- Arrow functions and purity ---
@@ -187,30 +213,30 @@ test("namespace in file", () => {
 console.log("\nArrow functions and purity:");
 
 test("valid arrow functions", () => {
-  const out = check("valid-arrow-functions.data.ts");
+  const out = check("valid-arrow-functions.pure.ts");
   assert(out.includes("All values type-check successfully"), "Expected success");
 });
 
 test("IO globals banned (console)", () => {
-  const out = checkFails("invalid-has-io.data.ts");
+  const out = checkFails("invalid-has-io.pure.ts");
   assert(out !== null, "Expected validation to fail");
   assert(out.includes("console") && out.includes("not allowed"), "Expected console rejection");
 });
 
 test("void return type banned", () => {
-  const out = checkFails("invalid-void-return.data.ts");
+  const out = checkFails("invalid-void-return.pure.ts");
   assert(out !== null, "Expected validation to fail");
   assert(out.includes("void") && out.includes("not allowed"), "Expected void rejection");
 });
 
 test("any return type banned", () => {
-  const out = checkFails("invalid-any-return.data.ts");
+  const out = checkFails("invalid-any-return.pure.ts");
   assert(out !== null, "Expected validation to fail");
   assert(out.includes("any") && out.includes("not allowed"), "Expected any rejection");
 });
 
 test("async arrow functions banned", () => {
-  const out = checkFails("invalid-async-arrow.data.ts");
+  const out = checkFails("invalid-async-arrow.pure.ts");
   assert(out !== null, "Expected validation to fail");
   assert(out.includes("async") && out.includes("not allowed"), "Expected async rejection");
 });

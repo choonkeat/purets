@@ -28,7 +28,7 @@ function findDataTsFiles(baseDir) {
       const rel = prefix ? `${prefix}/${entry}` : entry;
       if (statSync(full).isDirectory() && entry !== "node_modules" && entry !== ".git") {
         walk(full, rel);
-      } else if (entry.endsWith(".data.ts")) {
+      } else if (entry.endsWith(".pure.ts")) {
         files.push(rel);
       }
     }
@@ -166,7 +166,7 @@ const HTML = `<!DOCTYPE html>
 </head>
 <body>
   <div id="sidebar">
-    <h2>.data.ts files</h2>
+    <h2>.pure.ts files</h2>
     <div id="file-list"></div>
   </div>
   <div id="main">
@@ -177,7 +177,7 @@ const HTML = `<!DOCTYPE html>
       <button id="close-btn" onclick="closeFile()" title="Close file">&times;</button>
     </div>
     <div id="editor-container" style="display:none"></div>
-    <div id="welcome">Select a .data.ts file to start editing</div>
+    <div id="welcome">Select a .pure.ts file to start editing</div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
@@ -284,7 +284,7 @@ const HTML = `<!DOCTYPE html>
         const oldModel = editor.getModel();
         if (oldModel) oldModel.dispose();
 
-        // .data.ts files are valid TypeScript — load directly!
+        // .pure.ts files are valid TypeScript — load directly!
         const uri = monaco.Uri.parse('file:///' + name.replace(/\\//g, '_'));
         const model = monaco.editor.createModel(data.content, 'typescript', uri);
         editor.setModel(model);
@@ -374,7 +374,7 @@ const HTML = `<!DOCTYPE html>
           if (line.startsWith(kw + ' ') || line.startsWith(kw + '(') || line.startsWith(kw + '{') || line === kw) {
             customMarkers.push({
               severity: monaco.MarkerSeverity.Error,
-              message: "'" + kw + "' is not allowed in .data.ts files. Only type declarations and const values are permitted.",
+              message: "'" + kw + "' is not allowed in .pure.ts files. Only type declarations and const values are permitted.",
               startLineNumber: i + 1,
               startColumn: 1,
               endLineNumber: i + 1,

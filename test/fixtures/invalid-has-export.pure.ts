@@ -1,5 +1,7 @@
-export type User = {
+type User = {
   name: string
 }
 
 const alice: User = { name: "Alice" }
+
+export default alice

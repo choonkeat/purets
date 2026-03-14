@@ -69,7 +69,7 @@ function validateAST(filePath) {
         break;
 
       case ts.SyntaxKind.ClassDeclaration:
-        errors.push({ line, message: "'class' is not allowed in .data.ts files." });
+        errors.push({ line, message: "'class' is not allowed in .pure.ts files." });
         break;
 
       case ts.SyntaxKind.InterfaceDeclaration:
@@ -81,17 +81,24 @@ function validateAST(filePath) {
         break;
 
       case ts.SyntaxKind.ImportDeclaration:
+        validateImport(node, line);
+        break;
+
       case ts.SyntaxKind.ImportEqualsDeclaration:
-        errors.push({ line, message: "'import' is not allowed. .data.ts files must be self-contained." });
+        errors.push({ line, message: "'import =' syntax is not allowed. Use 'import { x } from \"./file.pure.ts\"'." });
         break;
 
       case ts.SyntaxKind.ExportDeclaration:
+        // Named exports allowed: export { x }, export type { T }
+        // But not: export default
+        break;
+
       case ts.SyntaxKind.ExportAssignment:
-        errors.push({ line, message: "'export' is not allowed in .data.ts files." });
+        errors.push({ line, message: "'export default' is not allowed. Use named exports: export { x }." });
         break;
 
       case ts.SyntaxKind.ModuleDeclaration:
-        errors.push({ line, message: "'namespace'/'module' is not allowed in .data.ts files." });
+        errors.push({ line, message: "'namespace'/'module' is not allowed in .pure.ts files." });
         break;
 
       case ts.SyntaxKind.IfStatement:
@@ -103,27 +110,24 @@ function validateAST(filePath) {
       case ts.SyntaxKind.SwitchStatement:
       case ts.SyntaxKind.TryStatement:
       case ts.SyntaxKind.ThrowStatement:
-        errors.push({ line, message: "Control flow statements are not allowed in .data.ts files." });
+        errors.push({ line, message: "Control flow statements are not allowed in .pure.ts files." });
         break;
 
       case ts.SyntaxKind.ExpressionStatement:
         errors.push({ line, message: "Expression statements are not allowed. Only type declarations and const assignments are permitted." });
         break;
 
-      // Handle export modifier on allowed declarations
+      // Handle modifiers on unrecognized declarations
       default:
         if (ts.canHaveModifiers(node)) {
           const modifiers = ts.getModifiers(node);
           if (modifiers) {
             for (const mod of modifiers) {
-              if (mod.kind === ts.SyntaxKind.ExportKeyword) {
-                errors.push({ line, message: "'export' is not allowed in .data.ts files." });
-              }
               if (mod.kind === ts.SyntaxKind.DeclareKeyword) {
-                errors.push({ line, message: "'declare' is not allowed in .data.ts files." });
+                errors.push({ line, message: "'declare' is not allowed in .pure.ts files." });
               }
               if (mod.kind === ts.SyntaxKind.AsyncKeyword) {
-                errors.push({ line, message: "'async' is not allowed. .data.ts functions must be synchronous and pure." });
+                errors.push({ line, message: "'async' is not allowed. .pure.ts functions must be synchronous and pure." });
               }
             }
           }
@@ -131,18 +135,37 @@ function validateAST(filePath) {
         break;
     }
 
-    // Check for export/declare/async modifiers on recognized nodes too
+    // Check for declare/default export modifiers on recognized nodes
     if (node.kind !== ts.SyntaxKind.EndOfFileToken && ts.canHaveModifiers(node)) {
       const modifiers = ts.getModifiers(node);
       if (modifiers) {
         for (const mod of modifiers) {
-          if (mod.kind === ts.SyntaxKind.ExportKeyword) {
-            errors.push({ line, message: "'export' is not allowed in .data.ts files." });
-          }
           if (mod.kind === ts.SyntaxKind.DeclareKeyword) {
-            errors.push({ line, message: "'declare' is not allowed in .data.ts files." });
+            errors.push({ line, message: "'declare' is not allowed in .pure.ts files." });
+          }
+          if (mod.kind === ts.SyntaxKind.DefaultKeyword) {
+            errors.push({ line, message: "'export default' is not allowed. Use named exports." });
           }
         }
+      }
+    }
+  }
+
+  function validateImport(node, line) {
+    const moduleSpecifier = node.moduleSpecifier;
+    if (moduleSpecifier && ts.isStringLiteral(moduleSpecifier)) {
+      const path = moduleSpecifier.text;
+
+      // Must import from a .pure.ts file
+      if (!path.endsWith(".pure.ts") && !path.endsWith(".pure")) {
+        errors.push({ line, message: `Can only import from .pure.ts files. '${path}' is not a .pure.ts module.` });
+      }
+    }
+
+    // No default imports
+    if (node.importClause) {
+      if (node.importClause.name) {
+        errors.push({ line, message: "Default imports are not allowed. Use named imports: import { x } from '...'." });
       }
     }
   }
@@ -154,7 +177,7 @@ function validateAST(filePath) {
     if (arrowFn.modifiers) {
       for (const mod of arrowFn.modifiers) {
         if (mod.kind === ts.SyntaxKind.AsyncKeyword) {
-          errors.push({ line, message: "'async' arrow functions are not allowed. .data.ts functions must be pure." });
+          errors.push({ line, message: "'async' arrow functions are not allowed. .pure.ts functions must be pure." });
         }
       }
     }
@@ -172,7 +195,7 @@ function validateAST(filePath) {
       errors.push({ line, message: `Return type '${normalized}' is not allowed. Functions must return a concrete data type.` });
     }
     if (normalized.startsWith("Promise")) {
-      errors.push({ line, message: `Return type 'Promise' is not allowed. .data.ts functions must be synchronous.` });
+      errors.push({ line, message: `Return type 'Promise' is not allowed. .pure.ts functions must be synchronous.` });
     }
   }
 
@@ -180,7 +203,7 @@ function validateAST(filePath) {
     function walk(n) {
       if (ts.isIdentifier(n) && BANNED_GLOBALS.has(n.text)) {
         const line = getLineNumber(n);
-        errors.push({ line, message: `'${n.text}' is not allowed. .data.ts files must be free of IO and side effects.` });
+        errors.push({ line, message: `'${n.text}' is not allowed. .pure.ts files must be free of IO and side effects.` });
       }
       ts.forEachChild(n, walk);
     }
@@ -201,6 +224,7 @@ function checkTypes(filePath) {
     noEmit: true,
     target: ts.ScriptTarget.ES2020,
     moduleResolution: ts.ModuleResolutionKind.NodeJs,
+    allowImportingTsExtensions: true,
   });
 
   const checker = program.getTypeChecker();
@@ -260,10 +284,10 @@ function checkTypes(filePath) {
 function check(filePath) {
   const absPath = resolve(filePath);
 
-  // Step 1: AST-based validation of .data.ts subset constraints
+  // Step 1: AST-based validation of .pure.ts subset constraints
   const validationErrors = validateAST(absPath);
   if (validationErrors.length > 0) {
-    console.log("✗ Invalid .data.ts file:\n");
+    console.log("✗ Invalid .pure.ts file:\n");
     for (const err of validationErrors) {
       console.log(`  Line ${err.line}: ${err.message}`);
     }
@@ -289,7 +313,7 @@ function check(filePath) {
 const args = process.argv.slice(2);
 if (args.length === 0 || args[0] === "--help") {
   console.log("Usage:");
-  console.log("  datats check <file.data.ts>   Type-check a .data.ts file");
+  console.log("  datats check <file.pure.ts>   Type-check a .pure.ts file");
   console.log("  datats serve [dir] [--port N]  Launch web editor");
   console.log("  datats <dir>                   Launch web editor (shorthand)");
   process.exit(0);
@@ -312,7 +336,7 @@ if (args[0] === "check" && args[1]) {
   });
 } else {
   console.log("Usage:");
-  console.log("  datats check <file.data.ts>   Type-check a .data.ts file");
+  console.log("  datats check <file.pure.ts>   Type-check a .pure.ts file");
   console.log("  datats serve [dir] [--port N]  Launch web editor");
   console.log("  datats <dir>                   Launch web editor (shorthand)");
   process.exit(1);
