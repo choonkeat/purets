@@ -1,64 +1,255 @@
 #!/usr/bin/env node
 
-import { readFileSync, unlinkSync } from "fs";
-import { execSync } from "child_process";
+import ts from "typescript";
+import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Keywords that are NOT allowed in .data.ts files
-const DISALLOWED_KEYWORDS = [
-  "function", "class", "interface", "let", "var",
-  "import", "export", "return", "if", "else", "for", "while",
-  "do", "switch", "case", "break", "continue", "throw", "try",
-  "catch", "finally", "new", "delete", "typeof", "void", "yield",
-  "await", "async", "enum", "namespace", "module", "declare",
-  "abstract", "implements", "extends",
-];
+// IO-related globals that indicate impurity
+const BANNED_GLOBALS = new Set([
+  "console", "fetch", "require", "process", "window", "document",
+  "setTimeout", "setInterval", "clearTimeout", "clearInterval",
+  "XMLHttpRequest", "WebSocket", "alert", "prompt", "confirm",
+  "localStorage", "sessionStorage", "indexedDB",
+]);
 
-function validate(content) {
+// Banned return type names
+const BANNED_RETURN_TYPES = new Set([
+  "void", "any", "never", "unknown",
+]);
+
+function validateAST(filePath) {
+  const content = readFileSync(filePath, "utf-8");
+  const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.ES2020, true);
+
   const errors = [];
-  const lines = content.split("\n");
-  let inTypeBlock = false;
-  let braceDepth = 0;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line === "") continue;
+  function getLineNumber(node) {
+    const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+    return line + 1;
+  }
 
-    // Track brace depth for type bodies
-    if (line.startsWith("type ") && line.includes("{")) {
-      inTypeBlock = true;
-    }
-    for (const ch of line) {
-      if (ch === "{") braceDepth++;
-      if (ch === "}") braceDepth--;
-    }
-    if (inTypeBlock && braceDepth === 0) {
-      inTypeBlock = false;
-    }
+  function visitNode(node) {
+    const line = getLineNumber(node);
 
-    // Inside a type body, allow field definitions
-    if (inTypeBlock) continue;
-
-    // Allow: type declarations
-    if (line.startsWith("type ")) continue;
-
-    // Allow: const with type annotation (our data values)
-    if (line.startsWith("const ") && line.includes(":")) continue;
-
-    // Allow: closing braces, comments, blank lines
-    if (line === "}" || line.startsWith("//") || line.startsWith("/*") || line.startsWith("*") || line.startsWith("*/")) continue;
-
-    // Allow: continuation of object literals / arrays
-    if (line.match(/^[\[\]{}",\d\-]/) || line.match(/^\w+\s*:/) || line === "true" || line === "false" || line === "null") continue;
-
-    // Check for disallowed keywords
-    for (const kw of DISALLOWED_KEYWORDS) {
-      if (line.startsWith(kw + " ") || line.startsWith(kw + "(") || line.startsWith(kw + "{") || line === kw) {
-        errors.push({ line: i + 1, message: `'${kw}' is not allowed in .data.ts files. Only type declarations and const values are permitted.` });
+    // Top-level statements only — we check what kind of statement each is
+    switch (node.kind) {
+      case ts.SyntaxKind.TypeAliasDeclaration:
+        // type Foo = { ... } — ALLOWED
         break;
+
+      case ts.SyntaxKind.VariableStatement: {
+        // const x: T = value — check each declaration
+        const declList = node.declarationList;
+
+        // Must be const, not let/var
+        if (!(declList.flags & ts.NodeFlags.Const)) {
+          const keyword = declList.flags & ts.NodeFlags.Let ? "let" : "var";
+          errors.push({ line, message: `'${keyword}' is not allowed. Use 'const' for all declarations.` });
+          break;
+        }
+
+        for (const decl of declList.declarations) {
+          if (decl.initializer) {
+            // Check for arrow functions
+            if (ts.isArrowFunction(decl.initializer)) {
+              validateArrowFunction(decl, line);
+            }
+            // Scan the initializer for banned globals
+            checkForBannedGlobals(decl.initializer, line);
+          }
+        }
+        break;
+      }
+
+      case ts.SyntaxKind.FunctionDeclaration:
+        errors.push({ line, message: "'function' declarations are not allowed. Use arrow functions: const f = (x: T) => ..." });
+        break;
+
+      case ts.SyntaxKind.ClassDeclaration:
+        errors.push({ line, message: "'class' is not allowed in .data.ts files." });
+        break;
+
+      case ts.SyntaxKind.InterfaceDeclaration:
+        errors.push({ line, message: "'interface' is not allowed. Use 'type' instead." });
+        break;
+
+      case ts.SyntaxKind.EnumDeclaration:
+        errors.push({ line, message: "'enum' is not allowed. Use union types instead: type Status = 'active' | 'inactive'" });
+        break;
+
+      case ts.SyntaxKind.ImportDeclaration:
+      case ts.SyntaxKind.ImportEqualsDeclaration:
+        errors.push({ line, message: "'import' is not allowed. .data.ts files must be self-contained." });
+        break;
+
+      case ts.SyntaxKind.ExportDeclaration:
+      case ts.SyntaxKind.ExportAssignment:
+        errors.push({ line, message: "'export' is not allowed in .data.ts files." });
+        break;
+
+      case ts.SyntaxKind.ModuleDeclaration:
+        errors.push({ line, message: "'namespace'/'module' is not allowed in .data.ts files." });
+        break;
+
+      case ts.SyntaxKind.IfStatement:
+      case ts.SyntaxKind.ForStatement:
+      case ts.SyntaxKind.ForInStatement:
+      case ts.SyntaxKind.ForOfStatement:
+      case ts.SyntaxKind.WhileStatement:
+      case ts.SyntaxKind.DoStatement:
+      case ts.SyntaxKind.SwitchStatement:
+      case ts.SyntaxKind.TryStatement:
+      case ts.SyntaxKind.ThrowStatement:
+        errors.push({ line, message: "Control flow statements are not allowed in .data.ts files." });
+        break;
+
+      case ts.SyntaxKind.ExpressionStatement:
+        errors.push({ line, message: "Expression statements are not allowed. Only type declarations and const assignments are permitted." });
+        break;
+
+      // Handle export modifier on allowed declarations
+      default:
+        if (ts.canHaveModifiers(node)) {
+          const modifiers = ts.getModifiers(node);
+          if (modifiers) {
+            for (const mod of modifiers) {
+              if (mod.kind === ts.SyntaxKind.ExportKeyword) {
+                errors.push({ line, message: "'export' is not allowed in .data.ts files." });
+              }
+              if (mod.kind === ts.SyntaxKind.DeclareKeyword) {
+                errors.push({ line, message: "'declare' is not allowed in .data.ts files." });
+              }
+              if (mod.kind === ts.SyntaxKind.AsyncKeyword) {
+                errors.push({ line, message: "'async' is not allowed. .data.ts functions must be synchronous and pure." });
+              }
+            }
+          }
+        }
+        break;
+    }
+
+    // Check for export/declare/async modifiers on recognized nodes too
+    if (node.kind !== ts.SyntaxKind.EndOfFileToken && ts.canHaveModifiers(node)) {
+      const modifiers = ts.getModifiers(node);
+      if (modifiers) {
+        for (const mod of modifiers) {
+          if (mod.kind === ts.SyntaxKind.ExportKeyword) {
+            errors.push({ line, message: "'export' is not allowed in .data.ts files." });
+          }
+          if (mod.kind === ts.SyntaxKind.DeclareKeyword) {
+            errors.push({ line, message: "'declare' is not allowed in .data.ts files." });
+          }
+        }
+      }
+    }
+  }
+
+  function validateArrowFunction(decl, line) {
+    const arrowFn = decl.initializer;
+
+    // Check for async modifier
+    if (arrowFn.modifiers) {
+      for (const mod of arrowFn.modifiers) {
+        if (mod.kind === ts.SyntaxKind.AsyncKeyword) {
+          errors.push({ line, message: "'async' arrow functions are not allowed. .data.ts functions must be pure." });
+        }
+      }
+    }
+
+    // Check explicit return type if present
+    if (arrowFn.type) {
+      const returnTypeText = arrowFn.type.getText(sourceFile);
+      checkReturnTypeText(returnTypeText, line);
+    }
+  }
+
+  function checkReturnTypeText(typeText, line) {
+    const normalized = typeText.trim();
+    if (BANNED_RETURN_TYPES.has(normalized)) {
+      errors.push({ line, message: `Return type '${normalized}' is not allowed. Functions must return a concrete data type.` });
+    }
+    if (normalized.startsWith("Promise")) {
+      errors.push({ line, message: `Return type 'Promise' is not allowed. .data.ts functions must be synchronous.` });
+    }
+  }
+
+  function checkForBannedGlobals(node, declLine) {
+    function walk(n) {
+      if (ts.isIdentifier(n) && BANNED_GLOBALS.has(n.text)) {
+        const line = getLineNumber(n);
+        errors.push({ line, message: `'${n.text}' is not allowed. .data.ts files must be free of IO and side effects.` });
+      }
+      ts.forEachChild(n, walk);
+    }
+    walk(node);
+  }
+
+  // Visit top-level statements
+  for (const statement of sourceFile.statements) {
+    visitNode(statement);
+  }
+
+  return errors;
+}
+
+function checkTypes(filePath) {
+  const program = ts.createProgram([filePath], {
+    strict: true,
+    noEmit: true,
+    target: ts.ScriptTarget.ES2020,
+    moduleResolution: ts.ModuleResolutionKind.NodeJs,
+  });
+
+  const checker = program.getTypeChecker();
+  const sourceFile = program.getSourceFile(filePath);
+  const errors = [];
+
+  // Get standard TS diagnostics
+  const diagnostics = [
+    ...program.getSyntacticDiagnostics(sourceFile),
+    ...program.getSemanticDiagnostics(sourceFile),
+  ];
+
+  for (const diag of diagnostics) {
+    if (diag.file && diag.start !== undefined) {
+      const { line } = diag.file.getLineAndCharacterOfPosition(diag.start);
+      const message = ts.flattenDiagnosticMessageText(diag.messageText, "\n");
+      errors.push({ line: line + 1, code: `TS${diag.code}`, message });
+    }
+  }
+
+  // Check inferred return types of arrow functions
+  if (sourceFile) {
+    for (const statement of sourceFile.statements) {
+      if (ts.isVariableStatement(statement)) {
+        for (const decl of statement.declarationList.declarations) {
+          if (decl.initializer && ts.isArrowFunction(decl.initializer)) {
+            const sig = checker.getSignatureFromDeclaration(decl.initializer);
+            if (sig) {
+              const returnType = checker.getReturnTypeOfSignature(sig);
+              const typeName = checker.typeToString(returnType);
+              const { line } = sourceFile.getLineAndCharacterOfPosition(decl.getStart());
+
+              if (BANNED_RETURN_TYPES.has(typeName)) {
+                errors.push({
+                  line: line + 1,
+                  code: "DATATS",
+                  message: `Arrow function infers return type '${typeName}'. Functions must return a concrete data type.`,
+                });
+              }
+              if (typeName.startsWith("Promise")) {
+                errors.push({
+                  line: line + 1,
+                  code: "DATATS",
+                  message: `Arrow function infers return type '${typeName}'. Async/Promise types are not allowed.`,
+                });
+              }
+            }
+          }
+        }
       }
     }
   }
@@ -68,10 +259,9 @@ function validate(content) {
 
 function check(filePath) {
   const absPath = resolve(filePath);
-  const content = readFileSync(absPath, "utf-8");
 
-  // Step 1: Validate .data.ts subset constraints
-  const validationErrors = validate(content);
+  // Step 1: AST-based validation of .data.ts subset constraints
+  const validationErrors = validateAST(absPath);
   if (validationErrors.length > 0) {
     console.log("✗ Invalid .data.ts file:\n");
     for (const err of validationErrors) {
@@ -81,29 +271,17 @@ function check(filePath) {
     return;
   }
 
-  // Step 2: Run tsc directly on the file (it's valid TS!)
-  try {
-    const tscPath = resolve(__dirname, "node_modules/.bin/tsc");
-    execSync(`${tscPath} --noEmit --strict --target es2020 --moduleResolution node ${absPath}`, {
-      encoding: "utf-8",
-      stdio: "pipe",
-    });
-    console.log("✓ All values type-check successfully!");
-  } catch (err) {
-    const output = err.stdout || err.stderr || "";
+  // Step 2: Type checking with inferred return type validation
+  const typeErrors = checkTypes(absPath);
+  if (typeErrors.length > 0) {
     console.log("✗ Type errors found:\n");
-
-    const lines = output.split("\n").filter((l) => l.trim());
-    for (const line of lines) {
-      const errorMatch = line.match(/\.data\.ts\((\d+),(\d+)\): error (TS\d+): (.+)/);
-      if (errorMatch) {
-        const [, lineNum, col, code, message] = errorMatch;
-        console.log(`  Line ${lineNum}: ${message} [${code}]`);
-      } else if (line.trim()) {
-        console.log(`  ${line}`);
-      }
+    for (const err of typeErrors) {
+      const code = err.code ? ` [${err.code}]` : "";
+      console.log(`  Line ${err.line}: ${err.message}${code}`);
     }
     process.exitCode = 1;
+  } else {
+    console.log("✓ All values type-check successfully!");
   }
 }
 

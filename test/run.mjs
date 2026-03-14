@@ -117,7 +117,7 @@ console.log("\nDisallowed constructs (should reject):");
 test("function in file", () => {
   const out = checkFails("invalid-has-function.data.ts");
   assert(out !== null, "Expected validation to fail");
-  assert(out.includes("'function' is not allowed"), "Expected function rejection");
+  assert(out.includes("function") && out.includes("not allowed"), "Expected function rejection");
 });
 
 test("class in file", () => {
@@ -135,8 +135,8 @@ test("interface in file", () => {
 test("let/var/function in file", () => {
   const out = checkFails("invalid-code-in-values.data.ts");
   assert(out !== null, "Expected validation to fail");
-  assert(out.includes("'let' is not allowed"), "Expected let rejection");
-  assert(out.includes("'function' is not allowed"), "Expected function rejection");
+  assert(out.includes("let") && out.includes("not allowed"), "Expected let rejection");
+  assert(out.includes("function") && out.includes("not allowed"), "Expected function rejection");
 });
 
 test("import in file", () => {
@@ -161,9 +161,7 @@ test("let/var in file", () => {
 test("control flow in file", () => {
   const out = checkFails("invalid-has-control-flow.data.ts");
   assert(out !== null, "Expected validation to fail");
-  assert(out.includes("'if' is not allowed"), "Expected if rejection");
-  assert(out.includes("'for' is not allowed"), "Expected for rejection");
-  assert(out.includes("'while' is not allowed"), "Expected while rejection");
+  assert(out.includes("Control flow") && out.includes("not allowed"), "Expected control flow rejection");
 });
 
 test("export in file", () => {
@@ -181,7 +179,40 @@ test("declare in file", () => {
 test("namespace in file", () => {
   const out = checkFails("invalid-has-namespace.data.ts");
   assert(out !== null, "Expected validation to fail");
-  assert(out.includes("'namespace' is not allowed"), "Expected namespace rejection");
+  assert(out.includes("namespace") && out.includes("not allowed"), "Expected namespace rejection");
+});
+
+// --- Arrow functions and purity ---
+
+console.log("\nArrow functions and purity:");
+
+test("valid arrow functions", () => {
+  const out = check("valid-arrow-functions.data.ts");
+  assert(out.includes("All values type-check successfully"), "Expected success");
+});
+
+test("IO globals banned (console)", () => {
+  const out = checkFails("invalid-has-io.data.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("console") && out.includes("not allowed"), "Expected console rejection");
+});
+
+test("void return type banned", () => {
+  const out = checkFails("invalid-void-return.data.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("void") && out.includes("not allowed"), "Expected void rejection");
+});
+
+test("any return type banned", () => {
+  const out = checkFails("invalid-any-return.data.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("any") && out.includes("not allowed"), "Expected any rejection");
+});
+
+test("async arrow functions banned", () => {
+  const out = checkFails("invalid-async-arrow.data.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("async") && out.includes("not allowed"), "Expected async rejection");
 });
 
 // --- Summary ---
