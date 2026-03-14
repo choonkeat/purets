@@ -11,7 +11,8 @@ Since `.pure.ts` files are valid TypeScript, a user could write anything: functi
 The question evolved through several stages:
 1. Initially: only `type` declarations and typed `const` values
 2. Then: what about functions? They're useful alongside data
-3. Resolution: allow pure arrow functions, ban everything impure
+3. First resolution: allow pure arrow functions only, ban `function` keyword
+4. Revised: allow both `function` declarations and arrow functions, ban `this` instead
 
 ## Decision
 
@@ -21,7 +22,8 @@ The question evolved through several stages:
 
 Walk the syntax tree and check that every top-level statement is one of:
 - `type` declaration
-- `const` declaration (with type annotation or arrow function)
+- `const` declaration (with type annotation or arrow/function expression)
+- `function` declaration (pure — no `this`, no `async`, no generators)
 
 Everything else is rejected with a clear error message.
 
@@ -34,17 +36,20 @@ Standard TypeScript type checking plus custom checks on inferred return types.
 - `type` declarations (aliases, unions, generics, tuples — full TS type syntax)
 - `const` with type annotations (data values)
 - `const` with arrow functions (pure functions)
-- `export` on types and const (named exports only)
+- `function` declarations (pure functions — no `this`, no generators)
+- `export` on types, const, and functions (named exports only)
 - `import { x } from "./file.pure.ts"` (only from other `.pure.ts` files)
 
 ### What's banned
 
-**Constructs:** `function`, `class`, `interface`, `enum`, `namespace`, `let`, `var`, `declare`
+**Constructs:** `class`, `interface`, `enum`, `namespace`, `let`, `var`, `declare`
 
 **Control flow:** `if`, `for`, `while`, `do`, `switch`, `try`, `throw`, `return`, `break`, `continue`
 
 **Impurity signals:**
+- `this` keyword (anywhere — functions must be stateless)
 - `async` / `await` keywords
+- Generator functions (`function*`)
 - IO globals: `console`, `fetch`, `process`, `window`, `document`, `setTimeout`, `setInterval`, etc.
 - Return types: `void`, `any`, `never`, `unknown`, `Promise` (both explicit and inferred)
 
@@ -68,6 +73,7 @@ Originally used regex line scanning. Switched to TypeScript's AST (`ts.createSou
 - **Regex-based validation** — used initially, replaced with AST for precision
 - **Separate file types** (`.data.ts` for data, `.fn.pure.ts` for functions) — unnecessary complexity
 - **Ban all functions** — too restrictive; derived data and smart constructors are valuable
+- **Arrow functions only** — initially chosen, but `function` keyword isn't the problem, `this` is. Standard functions offer better stack traces, hoisting, and familiarity
 
 ## Note on Promise.resolve()
 

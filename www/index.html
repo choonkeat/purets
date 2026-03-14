@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>purets — TypeScript minus minus</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --bg2: #1e293b;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #7c3aed;
+      --accent2: #8b5cf6;
+      --green: #4ade80;
+      --red: #f87171;
+      --border: #334155;
+      --code-bg: #1e293b;
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --mono: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* Header */
+    header {
+      padding: 4rem 0 2rem;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 3rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--accent), var(--accent2), var(--green));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      font-size: 1.25rem;
+      color: var(--muted);
+      font-weight: 400;
+      margin-bottom: 1rem;
+    }
+
+    .tagline {
+      font-size: 1rem;
+      color: var(--muted);
+      max-width: 500px;
+      margin: 0 auto 2rem;
+    }
+
+    .links {
+      display: flex;
+      gap: 1.5rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .links a {
+      color: var(--accent2);
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: color 0.15s;
+    }
+
+    .links a:hover { color: var(--green); }
+
+    /* Sections */
+    section {
+      margin: 3rem 0;
+    }
+
+    h2 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      color: var(--text);
+    }
+
+    h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin: 1.5rem 0 0.75rem;
+      color: var(--text);
+    }
+
+    p {
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+
+    /* Code */
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      margin: 1rem 0;
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      line-height: 1.5;
+      position: relative;
+    }
+
+    code {
+      font-family: var(--mono);
+      font-size: 0.85em;
+    }
+
+    p code, li code, td code {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+    }
+
+    /* Keywords */
+    .k { color: #c792ea; }
+    .s { color: #c3e88d; }
+    .c { color: #6a737d; font-style: italic; }
+    .n { color: #f78c6c; }
+    .t { color: #ffcb6b; }
+    .f { color: #82aaff; }
+
+    /* Rules table */
+    .rules {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+      margin: 1.5rem 0;
+    }
+
+    .rule-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+    }
+
+    .rule-card h3 {
+      margin: 0 0 0.75rem;
+      font-size: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .rule-card ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    .rule-card li {
+      color: var(--muted);
+      font-size: 0.9rem;
+      padding: 0.2rem 0;
+    }
+
+    .rule-card li::before {
+      margin-right: 0.5rem;
+    }
+
+    .allowed li::before { content: '\2713'; color: var(--green); }
+    .banned li::before { content: '\2717'; color: var(--red); }
+
+    /* Quick start */
+    .install {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin: 1rem 0;
+    }
+
+    .install code {
+      color: var(--green);
+      border: none;
+      background: none;
+      padding: 0;
+    }
+
+    /* File tree */
+    .tree {
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      line-height: 1.8;
+      color: var(--muted);
+    }
+
+    .tree .pure { color: var(--green); font-weight: 600; }
+    .tree .regular { color: var(--muted); }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      padding: 3rem 0;
+      color: var(--muted);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--border);
+      margin-top: 3rem;
+    }
+
+    footer a { color: var(--accent2); text-decoration: none; }
+    footer a:hover { color: var(--green); }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      h1 { font-size: 2rem; }
+      .subtitle { font-size: 1rem; }
+      .rules { grid-template-columns: 1fr; }
+      header { padding: 2.5rem 0 1.5rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>purets</h1>
+      <p class="subtitle">TypeScript minus minus</p>
+      <p class="tagline">A pure subset of TypeScript for typed data and functions. Carve out pure islands in your codebase.</p>
+      <div class="links">
+        <a href="https://github.com/choonkeat/purets">GitHub</a>
+        <a href="#rules">Rules</a>
+        <a href="#quick-start">Quick Start</a>
+        <a href="#pure-islands">Pure Islands</a>
+      </div>
+    </header>
+
+    <section>
+      <h2>What is it?</h2>
+      <p><code>.pure.ts</code> files are valid TypeScript with one constraint: <strong style="color: var(--text)">everything must be pure</strong>. No side effects, no IO, no mutation &mdash; just types, data, and functions.</p>
+      <p>Think of it as <code>"use strict"</code> for purity. Your editor already understands it. <code>tsc</code> already type-checks it. <code>purets</code> just enforces the rules.</p>
+
+      <pre><span class="c">// models.pure.ts</span>
+
+<span class="k">type</span> <span class="t">User</span> = {
+  name: <span class="k">string</span>
+  age: <span class="k">number</span>
+}
+
+<span class="k">type</span> <span class="t">Status</span> = <span class="s">"active"</span> | <span class="s">"inactive"</span>
+
+<span class="k">function</span> <span class="f">greet</span>(user: <span class="t">User</span>): <span class="k">string</span> {
+  <span class="k">return</span> <span class="s">"Hello "</span> + user.name
+}
+
+<span class="k">const</span> adults = (users: <span class="t">User</span>[]): <span class="t">User</span>[] =>
+  users.filter(u => u.age >= <span class="n">18</span>)
+
+<span class="k">const</span> alice: <span class="t">User</span> = { name: <span class="s">"Alice"</span>, age: <span class="n">30</span> }</pre>
+    </section>
+
+    <section id="rules">
+      <h2>The Rules</h2>
+      <div class="rules">
+        <div class="rule-card allowed">
+          <h3>Allowed</h3>
+          <ul>
+            <li><code>type</code> declarations</li>
+            <li><code>const</code> values</li>
+            <li><code>function</code> declarations</li>
+            <li>Arrow functions</li>
+            <li>Named <code>import</code> from <code>.pure.ts</code></li>
+            <li>Named <code>export</code></li>
+            <li>Generics, unions, tuples</li>
+          </ul>
+        </div>
+        <div class="rule-card banned">
+          <h3>Banned</h3>
+          <ul>
+            <li><code>class</code>, <code>interface</code>, <code>enum</code></li>
+            <li><code>let</code>, <code>var</code></li>
+            <li><code>this</code></li>
+            <li><code>async</code> / <code>await</code></li>
+            <li><code>console</code>, <code>fetch</code>, <code>process</code></li>
+            <li><code>export default</code></li>
+            <li>Import from non-<code>.pure.ts</code></li>
+            <li>Return <code>void</code>, <code>any</code>, <code>Promise</code></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="quick-start">
+      <h2>Quick Start</h2>
+      <div class="install">
+        <code>npm install purets</code>
+      </div>
+
+      <h3>Check a file</h3>
+      <pre>purets check data.pure.ts</pre>
+
+      <h3>Pass extra tsc flags</h3>
+      <pre>purets check data.pure.ts -- --noUnusedLocals</pre>
+
+      <h3>Launch the web editor</h3>
+      <pre>purets edit
+purets edit ./data --port 8080</pre>
+    </section>
+
+    <section id="pure-islands">
+      <h2>Pure Islands</h2>
+      <p>You don't have to convert your whole project. Use <code>.pure.ts</code> for the parts that benefit from purity guarantees:</p>
+      <div class="tree">
+        src/<br>
+        &nbsp;&nbsp;api/<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;<span class="regular">routes.ts</span> <span class="c">&mdash; Express handlers, IO</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;<span class="regular">middleware.ts</span> <span class="c">&mdash; side effects</span><br>
+        &nbsp;&nbsp;domain/<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;<span class="pure">models.pure.ts</span> <span class="c">&mdash; types + constructors</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;<span class="pure">validators.pure.ts</span> <span class="c">&mdash; pure validation</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;<span class="pure">transforms.pure.ts</span> <span class="c">&mdash; pure transforms</span><br>
+        &nbsp;&nbsp;utils/<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;<span class="pure">math.pure.ts</span> <span class="c">&mdash; pure utilities</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;<span class="pure">format.pure.ts</span> <span class="c">&mdash; pure formatting</span><br>
+        &nbsp;&nbsp;<span class="regular">index.ts</span> <span class="c">&mdash; wires everything together</span>
+      </div>
+      <p style="margin-top: 1rem;">Regular <code>.ts</code> files can import from <code>.pure.ts</code> freely. The purity guarantee flows one way: pure code can't depend on impure code, but impure code can use pure modules.</p>
+    </section>
+
+    <section>
+      <h2>How It Works</h2>
+      <p><code>purets</code> uses the TypeScript compiler API directly. No custom parser, no transpilation, no runtime.</p>
+      <h3>1. AST Validation</h3>
+      <p>Walks the syntax tree to enforce subset rules &mdash; detects banned constructs like <code>class</code>, <code>this</code>, <code>console</code>.</p>
+      <h3>2. Type Checking</h3>
+      <p>Runs <code>tsc --strict</code> via the compiler API for full type safety.</p>
+      <h3>3. Return Type Analysis</h3>
+      <p>Checks inferred return types &mdash; catches <code>void</code> and <code>any</code> even without explicit annotations.</p>
+    </section>
+
+    <section>
+      <h2>Web Editor</h2>
+      <p><code>purets edit</code> launches a browser-based editor powered by Monaco (same editor as VS Code). Live type checking, collapsible file tree, mobile responsive.</p>
+    </section>
+
+    <footer>
+      <p>MIT License &middot; <a href="https://github.com/choonkeat/purets">GitHub</a></p>
+    </footer>
+  </div>
+</body>
+</html>
