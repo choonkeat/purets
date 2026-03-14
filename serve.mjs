@@ -2,7 +2,7 @@
 
 import { createServer } from "http";
 import { readFileSync, writeFileSync, readdirSync, statSync } from "fs";
-import { resolve, join } from "path";
+import { resolve, join, dirname } from "path";
 import { exec } from "child_process";
 import { platform } from "os";
 
@@ -12,7 +12,9 @@ const portFlag = args.find((a, i) => args[i - 1] === "--port") || null;
 const dirArg = args.find((a) => !a.startsWith("--") && a !== portFlag) || ".";
 const noOpen = args.includes("--no-open");
 
-const dir = resolve(dirArg);
+// If the path is a file, use its parent directory as the serving root
+const resolved = resolve(dirArg);
+const dir = statSync(resolved).isFile() ? dirname(resolved) : resolved;
 const port = parseInt(portFlag || process.env.PORT || "3000");
 
 function openBrowser(url) {
@@ -162,6 +164,44 @@ const HTML = `<!DOCTYPE html>
       color: #555;
       font-size: 16px;
     }
+
+    #back-btn {
+      display: none;
+      background: none;
+      border: none;
+      color: #888;
+      font-size: 16px;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 3px;
+      line-height: 1;
+    }
+    #back-btn:hover { background: #3c3c3c; color: #fff; }
+
+    /* Mobile: single-panel layout */
+    @media (max-width: 768px) {
+      body { flex-direction: column; }
+
+      #sidebar {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid #3c3c3c;
+      }
+
+      /* When a file is open on mobile, hide sidebar and show editor full-width */
+      body.mobile-editor-open #sidebar { display: none; }
+      body.mobile-editor-open #main { display: flex; }
+
+      /* When no file is open on mobile, show sidebar full-height, hide main */
+      body:not(.mobile-editor-open) #main { display: none; }
+      body:not(.mobile-editor-open) #sidebar { flex: 1; }
+
+      #back-btn { display: inline-block; }
+      #filename { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
+      #save-hint { font-size: 10px; }
+
+      #toolbar { padding: 0 8px; gap: 6px; }
+    }
   </style>
 </head>
 <body>
@@ -171,6 +211,7 @@ const HTML = `<!DOCTYPE html>
   </div>
   <div id="main">
     <div id="toolbar" style="display:none">
+      <button id="back-btn" onclick="backToFiles()" title="Back to files">&#8592;</button>
       <span id="filename"></span>
       <span id="status"></span>
       <span id="save-hint">Ctrl+S to save</span>
@@ -259,6 +300,12 @@ const HTML = `<!DOCTYPE html>
       document.getElementById('toolbar').style.display = 'none';
       document.getElementById('editor-container').style.display = 'none';
       document.getElementById('welcome').style.display = 'flex';
+      document.body.classList.remove('mobile-editor-open');
+    }
+
+    function backToFiles() {
+      // On mobile: go back to file list without closing the file
+      closeFile();
     }
 
     async function openFile(name) {
@@ -279,6 +326,7 @@ const HTML = `<!DOCTYPE html>
       document.getElementById('editor-container').style.display = 'block';
       document.getElementById('filename').textContent = name;
       setStatus('ok', 'Ready');
+      document.body.classList.add('mobile-editor-open');
 
       if (editor) {
         const oldModel = editor.getModel();

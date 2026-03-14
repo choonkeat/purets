@@ -12,4 +12,4 @@ check:
 	@node purets.mjs check $(FILE)
 
 edit:
-	@node purets.mjs edit .
+	@node purets.mjs edit $(or $(PATH_ARG),.)
