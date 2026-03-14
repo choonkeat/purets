@@ -1,0 +1,14 @@
+/*
+  enum Status {
+    Active,
+    Inactive
+  }
+
+  type User = {
+    name: string
+    status: Status
+  }
+*/
+
+// User
+{ "name": "Alice", "status": 0 }

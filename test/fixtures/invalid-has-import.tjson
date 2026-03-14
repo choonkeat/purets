@@ -1,0 +1,10 @@
+/*
+  import { Something } from "somewhere"
+
+  type User = {
+    name: string
+  }
+*/
+
+// User
+{ "name": "Alice" }

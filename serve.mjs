@@ -165,7 +165,9 @@ const HTML = `<!DOCTYPE html>
 
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
   <script>
+    // Exposed on window for testing
     let editor = null;
+    window.editor = null;
     let currentFile = null;
     let isDirty = false;
 
@@ -234,6 +236,18 @@ const HTML = `<!DOCTYPE html>
         // Store raw content for save
         editor._tjsonRaw = data.content;
         editor._tjsonTypeBlock = data.typeBlock;
+
+        // Run validation and check errors after TS diagnostics settle
+        setTimeout(() => {
+          validateTjsonContent(model);
+          const allMarkers = monaco.editor.getModelMarkers({ resource: model.uri });
+          const errors = allMarkers.filter(m => m.severity === monaco.MarkerSeverity.Error);
+          if (errors.length > 0) {
+            setStatus('error', errors.length + ' error(s)');
+          } else {
+            setStatus('ok', 'No errors');
+          }
+        }, 2000);
       }
     }
 
@@ -424,6 +438,8 @@ const HTML = `<!DOCTYPE html>
         renderWhitespace: 'selection',
         wordWrap: 'on',
       });
+      window.editor = editor;
+      window.monaco = monaco;
 
       editor.onDidChangeModelContent(() => {
         isDirty = true;

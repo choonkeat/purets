@@ -1,0 +1,10 @@
+/*
+  namespace Models {
+    type User = {
+      name: string
+    }
+  }
+*/
+
+// Models.User
+{ "name": "Alice" }

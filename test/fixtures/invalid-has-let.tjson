@@ -1,0 +1,11 @@
+/*
+  type User = {
+    name: string
+  }
+*/
+
+// User
+{ "name": "Alice" }
+
+let x = 42
+var y = "hello"
