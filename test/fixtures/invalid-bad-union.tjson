@@ -1,0 +1,14 @@
+/*
+  type Status = "active" | "inactive" | "pending"
+
+  type Account = {
+    id: number
+    status: Status
+  }
+*/
+
+// Account
+{ "id": 1, "status": "active" }
+
+// Account
+{ "id": 2, "status": "deleted" }

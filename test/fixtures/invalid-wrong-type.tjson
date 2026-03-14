@@ -1,0 +1,16 @@
+/*
+  type User = {
+    name: string
+    age: number
+    email: string
+  }
+*/
+
+// User
+{ "name": "Alice", "age": 30, "email": "alice@example.com" }
+
+// User
+{ "name": "Bob", "age": "twenty-five", "email": "bob@example.com" }
+
+// User
+{ "name": "Carol", "age": 35 }

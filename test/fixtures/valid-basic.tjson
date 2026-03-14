@@ -1,0 +1,26 @@
+/*
+  type Address = {
+    street: string
+    city: string
+  }
+
+  type User = {
+    name: string
+    age: number
+    address: Address
+  }
+
+  type Config = {
+    debug: boolean
+    maxRetries: number
+  }
+*/
+
+// User
+{ "name": "Alice", "age": 30, "address": { "street": "123 Main", "city": "Springfield" } }
+
+// User
+{ "name": "Bob", "age": 25, "address": { "street": "456 Oak", "city": "Shelbyville" } }
+
+// Config
+{ "debug": false, "maxRetries": 3 }

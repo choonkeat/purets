@@ -1,0 +1,15 @@
+/*
+  type Role = "admin" | "user" | "guest"
+
+  type User = {
+    name: string
+    role: Role
+    tags: string[]
+  }
+*/
+
+// User
+{ "name": "Alice", "role": "admin", "tags": ["staff", "eng"] }
+
+// User
+{ "name": "Bob", "role": "guest", "tags": [] }
