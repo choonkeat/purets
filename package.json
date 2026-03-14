@@ -1,17 +1,24 @@
 {
-  "name": "typed-json",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "name": "purets",
+  "version": "0.1.0",
+  "description": "TypeScript minus minus — a pure subset of TypeScript for typed data and functions",
+  "main": "purets.mjs",
+  "type": "module",
+  "bin": {
+    "purets": "./purets.mjs"
   },
-  "keywords": [],
+  "scripts": {
+    "test": "node test/run.mjs",
+    "test:e2e": "npx playwright test",
+    "test:all": "npm test && npm run test:e2e"
+  },
+  "keywords": ["typescript", "pure", "typed-data", "type-checker"],
   "author": "",
-  "license": "ISC",
-  "type": "commonjs",
+  "license": "MIT",
   "dependencies": {
-    "@playwright/test": "^1.58.2",
     "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
   }
 }
