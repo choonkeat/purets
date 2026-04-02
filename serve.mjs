@@ -5,6 +5,8 @@ import { readFileSync, writeFileSync, readdirSync, statSync } from "fs";
 import { resolve, join, dirname } from "path";
 import { exec } from "child_process";
 import { platform } from "os";
+import { fileURLToPath } from "url";
+import { validateContent } from "./purets.mjs";
 
 // Parse args
 const args = process.argv.slice(2);
@@ -338,8 +340,8 @@ const HTML = `<!DOCTYPE html>
         editor.setModel(model);
 
         // Check errors after TS diagnostics settle
-        setTimeout(() => {
-          validateDataTs(model);
+        setTimeout(async () => {
+          await validateDataTs(model);
           updateStatus();
         }, 2000);
       }
@@ -382,58 +384,29 @@ const HTML = `<!DOCTYPE html>
       }
     }
 
-    // datats subset validator — disallow non-type, non-const constructs
-    const DISALLOWED_KEYWORDS = [
-      'function', 'class', 'interface', 'let', 'var',
-      'import', 'export', 'return', 'if', 'else', 'for', 'while',
-      'do', 'switch', 'case', 'break', 'continue', 'throw', 'try',
-      'catch', 'finally', 'new', 'delete', 'typeof', 'void', 'yield',
-      'await', 'async', 'enum', 'namespace', 'module', 'declare',
-      'abstract', 'implements', 'extends',
-    ];
-
-    function validateDataTs(model) {
+    // Server-side validation using the same logic as purets CLI
+    async function validateDataTs(model) {
       const content = model.getValue();
-      const lines = content.split('\\n');
-      const customMarkers = [];
-      let inTypeBlock = false;
-      let braceDepth = 0;
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (line === '' || line.startsWith('//') || line.startsWith('/*') || line.startsWith('*') || line.startsWith('*/')) continue;
-
-        // Track type body braces
-        if (line.startsWith('type ') && line.includes('{')) inTypeBlock = true;
-        for (const ch of line) {
-          if (ch === '{') braceDepth++;
-          if (ch === '}') braceDepth--;
-        }
-        if (inTypeBlock && braceDepth === 0) { inTypeBlock = false; continue; }
-        if (inTypeBlock) continue;
-
-        // Allow: type declarations, const with type annotation, closing braces, object/array contents
-        if (line.startsWith('type ')) continue;
-        if (line.startsWith('const ') && line.includes(':')) continue;
-        if (line === '}') continue;
-        if (line.match(/^[|&{}\\/\\[\\]",\\d\\-]/) || line.match(/^\\w+\\??\\s*:/) || line === 'true' || line === 'false' || line === 'null') continue;
-
-        for (const kw of DISALLOWED_KEYWORDS) {
-          if (line.startsWith(kw + ' ') || line.startsWith(kw + '(') || line.startsWith(kw + '{') || line === kw) {
-            customMarkers.push({
-              severity: monaco.MarkerSeverity.Error,
-              message: "'" + kw + "' is not allowed in .pure.ts files. Only type declarations and const values are permitted.",
-              startLineNumber: i + 1,
-              startColumn: 1,
-              endLineNumber: i + 1,
-              endColumn: lines[i].length + 1,
-            });
-            break;
-          }
-        }
+      try {
+        const resp = await fetch('/api/validate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: currentFile || 'input.pure.ts', content }),
+        });
+        const { errors } = await resp.json();
+        const customMarkers = errors.map(err => ({
+          severity: monaco.MarkerSeverity.Error,
+          message: err.message,
+          startLineNumber: err.line,
+          startColumn: 1,
+          endLineNumber: err.line,
+          endColumn: model.getLineLength(err.line) + 1,
+        }));
+        monaco.editor.setModelMarkers(model, 'datats-validator', customMarkers);
+      } catch {
+        // Network error — clear custom markers silently
+        monaco.editor.setModelMarkers(model, 'datats-validator', []);
       }
-
-      monaco.editor.setModelMarkers(model, 'datats-validator', customMarkers);
     }
 
     // Initialize Monaco
@@ -470,8 +443,8 @@ const HTML = `<!DOCTYPE html>
         setStatus('', 'Modified');
 
         clearTimeout(editor._errorCheck);
-        editor._errorCheck = setTimeout(() => {
-          validateDataTs(editor.getModel());
+        editor._errorCheck = setTimeout(async () => {
+          await validateDataTs(editor.getModel());
           updateStatus();
         }, 1000);
       });
@@ -537,6 +510,23 @@ const server = createServer((req, res) => {
         writeFileSync(join(dir, name), content);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        res.writeHead(500);
+        res.end(err.message);
+      }
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/validate" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      try {
+        const { name, content } = JSON.parse(body);
+        const errors = validateContent(content, name || "input.pure.ts");
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ errors }));
       } catch (err) {
         res.writeHead(500);
         res.end(err.message);

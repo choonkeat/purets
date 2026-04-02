@@ -251,6 +251,27 @@ test("async arrow functions banned", () => {
   assert(out.includes("async") && out.includes("not allowed"), "Expected async rejection");
 });
 
+test("type assertions (as) banned", () => {
+  const out = checkFails("invalid-type-assertion.pure.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("Type assertions") && out.includes("not allowed"), "Expected type assertion rejection");
+});
+
+// --- JSON.parse strictness ---
+
+console.log("\nJSON.parse strictness:");
+
+test("JSON.parse returns unknown — cannot assign to typed variable", () => {
+  const out = checkFails("invalid-json-parse-any.pure.ts");
+  assert(out !== null, "Expected type check to fail");
+  assert(out.includes("unknown") && out.includes("not assignable"), "Expected unknown assignment error");
+});
+
+test("JSON.parse with type narrowing works", () => {
+  const out = check("valid-json-parse-narrowed.pure.ts");
+  assert(out.includes("All values type-check successfully"), "Expected success with narrowed JSON.parse");
+});
+
 // --- Summary ---
 console.log(`\n${passed + failed} tests, ${passed} passed, ${failed} failed\n`);
 process.exit(failed > 0 ? 1 : 0);

@@ -20,9 +20,18 @@ const BANNED_RETURN_TYPES = new Set([
   "void", "any", "never", "unknown",
 ]);
 
+export function validateContent(content, filename = "input.pure.ts") {
+  const sourceFile = ts.createSourceFile(filename, content, ts.ScriptTarget.ES2020, true);
+  return _validateSourceFile(sourceFile);
+}
+
 function validateAST(filePath) {
   const content = readFileSync(filePath, "utf-8");
   const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.ES2020, true);
+  return _validateSourceFile(sourceFile);
+}
+
+function _validateSourceFile(sourceFile) {
 
   const errors = [];
 
@@ -237,6 +246,10 @@ function validateAST(filePath) {
         const line = getLineNumber(n);
         errors.push({ line, message: "'this' is not allowed. .pure.ts functions must be pure and stateless." });
       }
+      if (ts.isAsExpression(n) || ts.isTypeAssertionExpression(n)) {
+        const line = getLineNumber(n);
+        errors.push({ line, message: "Type assertions ('as' / angle-bracket) are not allowed. Use type narrowing instead." });
+      }
       ts.forEachChild(n, walk);
     }
     walk(node);
@@ -251,12 +264,18 @@ function validateAST(filePath) {
 }
 
 function checkTypes(filePath, extraTscOptions = {}) {
-  const program = ts.createProgram([filePath], {
+  const overridePath = resolve(__dirname, "purets-overrides.d.ts");
+  const program = ts.createProgram([overridePath, filePath], {
     strict: true,
     noEmit: true,
     target: ts.ScriptTarget.ES2020,
-    moduleResolution: ts.ModuleResolutionKind.NodeJs,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
     allowImportingTsExtensions: true,
+    noUncheckedIndexedAccess: true,
+    exactOptionalPropertyTypes: true,
+    noImplicitReturns: true,
+    noFallthroughCasesInSwitch: true,
+    noPropertyAccessFromIndexSignature: true,
     ...extraTscOptions,
   });
 
@@ -381,36 +400,39 @@ Examples:
   purets edit
   purets edit ./data --port 8080`;
 
-// CLI
-const rawArgs = process.argv.slice(2);
+// CLI — only run when executed directly (not when imported)
+const __purets_file = fileURLToPath(import.meta.url);
+if (process.argv[1] === __purets_file || process.argv[1] === resolve(__purets_file)) {
+  const rawArgs = process.argv.slice(2);
 
-// Split on -- for tsc passthrough
-const dashDashIdx = rawArgs.indexOf("--");
-const args = dashDashIdx >= 0 ? rawArgs.slice(0, dashDashIdx) : rawArgs;
-const tscFlags = dashDashIdx >= 0 ? rawArgs.slice(dashDashIdx + 1) : [];
+  // Split on -- for tsc passthrough
+  const dashDashIdx = rawArgs.indexOf("--");
+  const args = dashDashIdx >= 0 ? rawArgs.slice(0, dashDashIdx) : rawArgs;
+  const tscFlags = dashDashIdx >= 0 ? rawArgs.slice(dashDashIdx + 1) : [];
 
-if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
-  console.log(HELP);
-  process.exit(0);
-}
+  if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
+    console.log(HELP);
+    process.exit(0);
+  }
 
-if (args[0] === "check" && args[1]) {
-  const extraTscOptions = parseTscFlags(tscFlags);
-  check(args[1], extraTscOptions);
-} else if (args[0] === "edit") {
-  const serveScript = resolve(__dirname, "serve.mjs");
-  const portIdx = args.indexOf("--port");
-  const portVal = portIdx >= 0 ? args[portIdx + 1] : null;
-  const noOpen = args.includes("--no-open");
-  const positional = args.filter((a, i) => a !== "edit" && a !== "--no-open" && a !== "--port" && (portIdx < 0 || i !== portIdx + 1));
-  const dir = positional[0] || ".";
-  const serveArgs = [resolve(dir)];
-  if (portVal) serveArgs.push("--port", portVal);
-  if (noOpen) serveArgs.push("--no-open");
-  import("child_process").then(({ execSync: ex }) => {
-    ex(`node ${serveScript} ${serveArgs.join(" ")}`, { stdio: "inherit" });
-  });
-} else {
-  console.log(HELP);
-  process.exit(1);
+  if (args[0] === "check" && args[1]) {
+    const extraTscOptions = parseTscFlags(tscFlags);
+    check(args[1], extraTscOptions);
+  } else if (args[0] === "edit") {
+    const serveScript = resolve(__dirname, "serve.mjs");
+    const portIdx = args.indexOf("--port");
+    const portVal = portIdx >= 0 ? args[portIdx + 1] : null;
+    const noOpen = args.includes("--no-open");
+    const positional = args.filter((a, i) => a !== "edit" && a !== "--no-open" && a !== "--port" && (portIdx < 0 || i !== portIdx + 1));
+    const dir = positional[0] || ".";
+    const serveArgs = [resolve(dir)];
+    if (portVal) serveArgs.push("--port", portVal);
+    if (noOpen) serveArgs.push("--no-open");
+    import("child_process").then(({ execSync: ex }) => {
+      ex(`node ${serveScript} ${serveArgs.join(" ")}`, { stdio: "inherit" });
+    });
+  } else {
+    console.log(HELP);
+    process.exit(1);
+  }
 }
