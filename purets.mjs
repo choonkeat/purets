@@ -452,7 +452,11 @@ const PURE_LIBRARY_MEMBERS = new Map(Object.entries({
   ArrayConstructor: 'isArray of',
   Array: 'at concat every filter find findIndex findLast findLastIndex flat flatMap includes indexOf join lastIndexOf map reduce reduceRight slice some toReversed toSorted toSpliced with',
   ReadonlyArray: 'at concat every filter find findIndex findLast findLastIndex flat flatMap includes indexOf join lastIndexOf map reduce reduceRight slice some toReversed toSorted toSpliced with',
-  String: 'at charAt charCodeAt codePointAt concat endsWith includes indexOf lastIndexOf normalize padEnd padStart repeat slice startsWith substring toLowerCase toUpperCase trim trimEnd trimStart toString valueOf',
+  // split/replace/replaceAll do not read or write RegExp.lastIndex, so they are
+  // deterministic even with a /g pattern — unlike test/exec/match, which are
+  // deliberately absent. A function argument to replace is a callback and is
+  // validated by the subset walk like any other.
+  String: 'at charAt charCodeAt codePointAt concat endsWith includes indexOf lastIndexOf normalize padEnd padStart repeat replace replaceAll slice split startsWith substring toLowerCase toUpperCase trim trimEnd trimStart toString valueOf',
   StringConstructor: 'fromCharCode fromCodePoint',
   Number: 'toExponential toFixed toPrecision toString valueOf',
   NumberConstructor: 'isFinite isInteger isNaN isSafeInteger parseFloat parseInt',
@@ -542,6 +546,39 @@ function validateTypePurity(program, sourceFile) {
   return errors.sort((a, b) => a.line - b.line);
 }
 
+// The editor validates on every keystroke, and each validation needs a
+// TypeScript program. Parsing lib.*.d.ts dominates that cost and those files
+// never change, so the host and the previous program are reused per option set.
+// Project files are always re-read, so edits are still picked up.
+const programCache = new Map();
+
+function getCachedHost(optionsKey, options) {
+  const cached = programCache.get(optionsKey);
+  if (cached) return cached;
+
+  const host = ts.createCompilerHost(options);
+  const baseReadFile = host.readFile;
+  const baseGetSourceFile = host.getSourceFile;
+  const libDir = resolve(dirname(ts.getDefaultLibFilePath(options)));
+  const libFiles = new Map();
+
+  host.getSourceFile = (fileName, langVersion, onError, shouldCreate) => {
+    if (resolve(dirname(fileName)) !== libDir) {
+      return baseGetSourceFile(fileName, langVersion, onError, shouldCreate);
+    }
+    const key = `${resolve(fileName)}|${langVersion}`;
+    const hit = libFiles.get(key);
+    if (hit) return hit;
+    const file = baseGetSourceFile(fileName, langVersion, onError, shouldCreate);
+    if (file) libFiles.set(key, file);
+    return file;
+  };
+
+  const entry = { host, baseReadFile, program: undefined };
+  programCache.set(optionsKey, entry);
+  return entry;
+}
+
 function createTypeProgram(filePath, extraTscOptions = {}, content) {
   const overridePath = resolve(__dirname, "purets-overrides.d.ts");
   const options = {
@@ -559,12 +596,18 @@ function createTypeProgram(filePath, extraTscOptions = {}, content) {
     noPropertyAccessFromIndexSignature: true,
     ...extraTscOptions,
   };
-  const host = ts.createCompilerHost(options);
-  if (content !== undefined) {
-    const readFile = host.readFile;
-    host.readFile = (path) => resolve(path) === filePath ? content : readFile(path);
-  }
-  return ts.createProgram([overridePath, filePath], options, host);
+
+  const entry = getCachedHost(JSON.stringify(extraTscOptions), options);
+  const { host, baseReadFile } = entry;
+
+  // Rebuild the unsaved-content override each call rather than stacking wrappers
+  host.readFile = content === undefined
+    ? baseReadFile
+    : (path) => (resolve(path) === filePath ? content : baseReadFile(path));
+
+  const program = ts.createProgram([overridePath, filePath], options, host, entry.program);
+  entry.program = program;
+  return program;
 }
 
 function checkTypes(filePath, extraTscOptions = {}) {

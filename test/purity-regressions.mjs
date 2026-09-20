@@ -28,6 +28,8 @@ export function runPurityRegressionTests(test, assert) {
     ['destructured random', 'const {random: roll} = Math; export const f = (): number => roll();', 'Standard-library operation'],
     ['random passed as callback', 'const m = Math; export const f = (): number[] => [1].map(m.random);', 'Standard-library operation'],
     ['aliased Object mutation', 'const o = Object; export const f = (x: {}) => o.assign(x, {n: 1});', 'Standard-library operation'],
+    ['string search', 'export const f = (s: string): number => s.search(/a/);', 'String.search'],
+    ['string match', 'export const f = (s: string) => s.match(/a/);', 'String.match'],
     ['constructor dynamic code', 'export const f = (): number => (() => 0).constructor("return Math.random()")();', 'constructor'],
     ['bracket constructor', 'export const f = (): number => (() => 0)["constructor"]("return 1")();', 'constructor'],
     ['computed constructor', 'export const f = (): number => { const k = "constructor"; return (() => 0)[k]("return 1")() };', 'Dynamic Function'],
@@ -63,6 +65,9 @@ export function runPurityRegressionTests(test, assert) {
     ['ordinary data properties', 'export const o = {test: "data", freeze: true, random: 1};'],
     ['pure user method named test', 'export const o = {test(x: number): boolean {return x > 0}}; export const b = o.test(1);'],
     ['safe standard operations', 'export const f = (xs: number[]): string => Object.keys({x: xs.slice(0).toSorted()}).join(",").toUpperCase();'],
+    ['string split', 'export const f = (s: string): string[] => s.split(",");'],
+    ['string replace', 'export const f = (s: string): string => s.replace("a", "b");'],
+    ['string replaceAll with callback', 'export const f = (s: string): string => s.replaceAll("a", (m: string): string => m.toUpperCase());'],
   ];
   for (const [name, source] of valid) {
     test(name, () => {
@@ -73,6 +78,24 @@ export function runPurityRegressionTests(test, assert) {
   // Exercise the CLI's separate AST/type passes as well as the editor API above.
   const dir = mkdtempSync(join(tmpdir(), 'purets-regressions-'));
   try {
+    // The compiler host is cached across calls; edits must still be seen.
+    test('cached host still sees edits in both directions', () => {
+      const good = 'export const f = (s: string): string => s.trim();';
+      const bad = 'export const f = (): number => Date.now();';
+      assert(validateContent(good, 'cache.pure.ts').length === 0, 'Expected clean first pass');
+      assert(validateContent(bad, 'cache.pure.ts').length > 0, 'Expected edit to bad source to be caught');
+      assert(validateContent(good, 'cache.pure.ts').length === 0, 'Expected edit back to good source to be clean');
+    });
+
+    test('cached host still sees type-level edits', () => {
+      const good = 'export const f = (s: string): string[] => s.split(",");';
+      const bad = 'export const f = (s: string): boolean => /a/g.test(s);';
+      assert(validateContent(good, 'cache2.pure.ts').length === 0, 'Expected clean first pass');
+      const errors = validateContent(bad, 'cache2.pure.ts');
+      assert(errors.some(e => e.message.includes('RegExp.test')), 'Expected RegExp.test rejection after edit');
+      assert(validateContent(good, 'cache2.pure.ts').length === 0, 'Expected edit back to good source to be clean');
+    });
+
     const cli = fileURLToPath(new URL('../purets.mjs', import.meta.url));
     for (const name of ['parameter mutation default', 'object method throw', 'bracket mutation', 'computed constructor', 'any call', 'regexp test', 'aliased freeze']) {
       const [, source, expected] = invalid.find(c => c[0] === name);

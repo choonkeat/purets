@@ -56,8 +56,33 @@ prove the behavior of arbitrary functions described by user-written types.
   coercions and dependence on ambient state. Include safe and unsafe tests.
 - Name-based mutator and prototype checks remain conservative: a pure custom
   method with one of these names can still be refused.
-- Editor validation now creates a TypeScript program for operation analysis,
-  which adds work per validation request. Caching can be considered separately.
+- Approved operations were reviewed once more after this ADR landed:
+  `String.split`, `String.replace` and `String.replaceAll` were missing and have
+  been added. None of them reads or writes `RegExp.lastIndex`, so they stay
+  deterministic with a `/g` pattern. `test`, `exec`, `match`, `matchAll` and
+  `search` remain refused for exactly that reason. A function argument to
+  `replace` is a callback and is validated by the subset walk like any other.
+
+## Validation cost
+
+Creating a program per validation cost ~273 ms after warm-up, which is
+noticeable in the editor on every keystroke. Parsing `lib.*.d.ts` dominates that
+— 99 files, 3 MB — and those files are identical on every validation, so the
+compiler host, its parsed default-library source files, and the previous program
+are reused per option set. Only project files are re-read. Same measurement with
+the cache in place: ~12 ms.
+
+Both numbers are 20 validations after one warm-up run, with **different source
+text on every call** and the same filename, so the saving cannot come from
+reusing a previous result. Feeding identical text instead measures ~10 ms, which
+is the 2 ms that structural reuse contributes; the rest is the 3 MB.
+
+Every validation still re-reads and re-checks the submitted text in full.
+Nothing about an edit is reused, and the unsaved-content override is rebuilt on
+each call rather than wrapped around the previous one. Two regression tests edit
+the same filename good → bad → good, at both the subset level and the type
+level, to pin that down. Skipping validation when nothing changed is the
+editor's concern, not the checker's, and is untouched here.
 
 A stronger design should first define the accepted data and function boundary,
 validate the complete module graph, and reject calls whose effects cannot be
