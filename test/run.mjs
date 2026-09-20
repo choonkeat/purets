@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { runPurityRegressionTests } from "./purity-regressions.mjs";
 import { execSync } from "child_process";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -350,6 +351,8 @@ test("new expressions banned", () => {
   assert(out !== null, "Expected validation to fail");
   assert(out.includes("'new' is not allowed"), "Expected new rejection");
 });
+
+runPurityRegressionTests(test, assert);
 
 // --- Summary ---
 console.log(`\n${passed + failed} tests, ${passed} passed, ${failed} failed\n`);

@@ -524,7 +524,7 @@ const server = createServer((req, res) => {
     req.on("end", () => {
       try {
         const { name, content } = JSON.parse(body);
-        const errors = validateContent(content, name || "input.pure.ts");
+        const errors = validateContent(content, resolve(dir, name || "input.pure.ts"));
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ errors }));
       } catch (err) {

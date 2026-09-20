@@ -1,6 +1,6 @@
 # ADR-007: Enforcing purity inside function bodies
 
-**Status:** Accepted
+**Status:** Accepted; traversal and operation policy superseded by [ADR-008](008-whole-file-validation-and-builtin-allowlist.md).
 
 **Date:** 2026-09-20
 

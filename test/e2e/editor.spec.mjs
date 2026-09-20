@@ -127,3 +127,29 @@ test.describe("Type Checking", () => {
     expect(errorCount).toBeGreaterThan(0);
   });
 });
+
+
+test.describe("Shared purity validation", () => {
+  test("unsaved code rejects hidden built-in state changes", async ({ request }) => {
+    const response = await request.post("/api/validate", {
+      data: {
+        name: "test/fixtures/unsaved.pure.ts",
+        content: 'export const f = (r: RegExp): boolean => r.test("a");',
+      },
+    });
+    expect(response.ok()).toBeTruthy();
+    const { errors } = await response.json();
+    expect(errors.some(e => e.message.includes("RegExp.test"))).toBeTruthy();
+  });
+
+  test("unsaved pure defaults and methods are accepted", async ({ request }) => {
+    const response = await request.post("/api/validate", {
+      data: {
+        name: "test/fixtures/unsaved.pure.ts",
+        content: 'export const o = { f(n = 1): number { return Math.abs(n) } };',
+      },
+    });
+    expect(response.ok()).toBeTruthy();
+    expect((await response.json()).errors).toEqual([]);
+  });
+});

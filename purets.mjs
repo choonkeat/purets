@@ -29,6 +29,7 @@ const MUTATING_METHODS = new Set([
 // Object.* helpers that mutate or reach around the type system
 const MUTATING_OBJECT_STATICS = new Set([
   "assign", "defineProperty", "defineProperties", "setPrototypeOf",
+  "freeze", "seal", "preventExtensions",
 ]);
 
 // Property accesses that are impure even though the object itself is fine
@@ -52,9 +53,39 @@ const BANNED_RETURN_TYPES = new Set([
   "void", "any", "never", "unknown",
 ]);
 
+function isRuntimeFunction(node) {
+  return ts.isArrowFunction(node) || ts.isFunctionExpression(node) ||
+    ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) ||
+    ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node);
+}
+
+function unwrapExpression(node) {
+  while (ts.isParenthesizedExpression(node) || ts.isNonNullExpression(node)) node = node.expression;
+  return node;
+}
+
+function memberName(node) {
+  if (ts.isPropertyAccessExpression(node)) return node.name.text;
+  if (ts.isElementAccessExpression(node)) {
+    const key = unwrapExpression(node.argumentExpression);
+    if (ts.isStringLiteralLike(key)) return key.text;
+  }
+  if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)) {
+    const key = node.propertyName || node.name;
+    if (ts.isIdentifier(key) || ts.isStringLiteralLike(key)) return key.text;
+    if (ts.isComputedPropertyName(key) && ts.isStringLiteralLike(key.expression)) return key.expression.text;
+  }
+  return undefined;
+}
+
 export function validateContent(content, filename = "input.pure.ts") {
   const sourceFile = ts.createSourceFile(filename, content, ts.ScriptTarget.ES2023, true);
-  return _validateSourceFile(sourceFile);
+  const errors = _validateSourceFile(sourceFile);
+  if (errors.length) return errors;
+  // The editor submits unsaved text; resolve types against that text, not disk.
+  const filePath = resolve(filename);
+  const program = createTypeProgram(filePath, {}, content);
+  return validateTypePurity(program, program.getSourceFile(filePath));
 }
 
 function validateAST(filePath) {
@@ -92,24 +123,11 @@ function _validateSourceFile(sourceFile) {
           break;
         }
 
-        for (const decl of declList.declarations) {
-          if (decl.initializer) {
-            // Check for arrow functions
-            if (ts.isArrowFunction(decl.initializer)) {
-              validateArrowFunction(decl, line);
-            } else if (ts.isFunctionExpression(decl.initializer)) {
-              validateNestedFunction(decl.initializer);
-            }
-            // Scan the initializer for banned globals
-            checkForBannedGlobals(decl.initializer, line);
-          }
-        }
         break;
       }
 
       case ts.SyntaxKind.FunctionDeclaration:
-        // function declarations allowed — validate purity
-        validateFunction(node, line);
+        // Function rules are applied by the whole-file walk below.
         break;
 
       case ts.SyntaxKind.ClassDeclaration:
@@ -195,34 +213,6 @@ function _validateSourceFile(sourceFile) {
     }
   }
 
-  function validateFunction(node, line) {
-    // Check for async modifier
-    if (node.modifiers) {
-      for (const mod of node.modifiers) {
-        if (mod.kind === ts.SyntaxKind.AsyncKeyword) {
-          errors.push({ line, message: "'async' functions are not allowed. .pure.ts functions must be pure." });
-        }
-      }
-    }
-
-    // Check for generator functions
-    if (node.asteriskToken) {
-      errors.push({ line, message: "Generator functions are not allowed in .pure.ts files." });
-    }
-
-    // Check explicit return type if present
-    if (node.type) {
-      const returnTypeText = node.type.getText(sourceFile);
-      checkReturnTypeText(returnTypeText, line);
-    }
-
-    // Scan body for banned globals, mutation and `this`
-    if (node.body) {
-      validateFunctionBody(node.body);
-      checkForBannedGlobals(node.body, line);
-    }
-  }
-
   function validateImport(node, line) {
     const moduleSpecifier = node.moduleSpecifier;
     if (moduleSpecifier && ts.isStringLiteral(moduleSpecifier)) {
@@ -240,33 +230,6 @@ function _validateSourceFile(sourceFile) {
         errors.push({ line, message: "Default imports are not allowed. Use named imports: import { x } from '...'." });
       }
     }
-  }
-
-  function validateArrowFunction(decl, line) {
-    const arrowFn = decl.initializer;
-
-    // Check for async modifier
-    if (arrowFn.modifiers) {
-      for (const mod of arrowFn.modifiers) {
-        if (mod.kind === ts.SyntaxKind.AsyncKeyword) {
-          errors.push({ line, message: "'async' arrow functions are not allowed. .pure.ts functions must be pure." });
-        }
-      }
-    }
-
-    // Check for generator (function expressions assigned to const)
-    if (arrowFn.asteriskToken) {
-      errors.push({ line, message: "Generator functions are not allowed in .pure.ts files." });
-    }
-
-    // Check explicit return type if present
-    if (arrowFn.type) {
-      const returnTypeText = arrowFn.type.getText(sourceFile);
-      checkReturnTypeText(returnTypeText, line);
-    }
-
-    // Statements inside the body follow the same rules
-    validateFunctionBody(arrowFn.body);
   }
 
   function checkReturnTypeText(typeText, line) {
@@ -304,7 +267,7 @@ function _validateSourceFile(sourceFile) {
   }
 
   // Deep scan of an expression subtree for anything impure.
-  function checkForBannedGlobals(node, declLine) {
+  function checkForBannedGlobals(node) {
     function walk(n) {
       if (ts.isIdentifier(n) && BANNED_GLOBALS.has(n.text) && isReferencePosition(n)) {
         const line = getLineNumber(n);
@@ -342,25 +305,29 @@ function _validateSourceFile(sourceFile) {
         errors.push({ line, message: "'delete' is not allowed. .pure.ts values are immutable." });
       }
 
-      // Math.random() and friends
-      if (ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.expression) && ts.isIdentifier(n.name)) {
-        const member = `${n.expression.text}.${n.name.text}`;
-        if (BANNED_MEMBERS.has(member)) {
-          const line = getLineNumber(n);
-          errors.push({ line, message: `'${member}' is not allowed. .pure.ts functions must be deterministic.` });
+      // Reject dangerous members on access, not just direct calls. This also
+      // catches extraction (const push = xs.push) and literal bracket access.
+      const name = memberName(n);
+      if (name) {
+        const line = getLineNumber(n);
+        if (["constructor", "__proto__", "prototype"].includes(name)) {
+          errors.push({ line, message: `Property '${name}' is not allowed. Dynamic code and prototype access are outside the pure subset.` });
         }
-        if (n.expression.text === "Object" && MUTATING_OBJECT_STATICS.has(n.name.text)) {
-          const line = getLineNumber(n);
-          errors.push({ line, message: `'Object.${n.name.text}' mutates its argument and is not allowed. Use object spread to build a new value.` });
+        if (MUTATING_METHODS.has(name)) {
+          errors.push({ line, message: `'.${name}()' mutates in place and is not allowed. Build a new value instead (e.g. [...xs, x], xs.toSorted()).` });
         }
-      }
-
-      // xs.push(...), m.set(...), xs.sort(...)
-      if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
-          ts.isIdentifier(n.expression.name) && MUTATING_METHODS.has(n.expression.name.text)) {
-        const name = n.expression.name.text;
-        const line = getLineNumber(n.expression.name);
-        errors.push({ line, message: `'.${name}()' mutates in place and is not allowed. Build a new value instead (e.g. [...xs, x], xs.toSorted()).` });
+        if (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n)) {
+          const receiver = unwrapExpression(n.expression);
+          if (ts.isIdentifier(receiver)) {
+            const member = `${receiver.text}.${name}`;
+            if (BANNED_MEMBERS.has(member)) {
+              errors.push({ line, message: `'${member}' is not allowed. .pure.ts functions must be deterministic.` });
+            }
+            if (receiver.text === "Object" && MUTATING_OBJECT_STATICS.has(name)) {
+              errors.push({ line, message: `'Object.${name}' mutates its argument and is not allowed. Use object spread to build a new value.` });
+            }
+          }
+        }
       }
 
       // await / yield anywhere, including in nested functions
@@ -384,7 +351,7 @@ function _validateSourceFile(sourceFile) {
       }
 
       // Nested functions get the same body rules as top-level ones
-      if (n !== node && (ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n))) {
+      if (isRuntimeFunction(n)) {
         validateNestedFunction(n);
       }
 
@@ -412,9 +379,7 @@ function _validateSourceFile(sourceFile) {
     validateFunctionBody(fn.body);
   }
 
-  // A function body may only hold `const` declarations and a `return`.
-  // Anything else is either control flow (banned) or a discarded value,
-  // which can only be there for its side effect.
+  // Branches and blocks recurse; every function body is checked by the walker.
   function validateFunctionBody(body) {
     if (!body || !ts.isBlock(body)) return;
     for (const stmt of body.statements) {
@@ -461,6 +426,9 @@ function _validateSourceFile(sourceFile) {
     visitNode(statement);
   }
 
+  // Scan the entire file once, including defaults, binding patterns and methods.
+  checkForBannedGlobals(sourceFile);
+
   // The deep scan and the statement walk can reach the same node twice
   const seen = new Set();
   const unique = errors.filter((e) => {
@@ -474,9 +442,109 @@ function _validateSourceFile(sourceFile) {
   return unique;
 }
 
-function checkTypes(filePath, extraTscOptions = {}) {
+// Only these standard-library callable declarations are admitted. Inspecting
+// declaration provenance preserves the policy through aliases and bracket access.
+// User functions/callbacks still rely on the pure-module/input contract; this is
+// not a proof of purity for arbitrary objects supplied by unvalidated JS callers.
+const PURE_LIBRARY_MEMBERS = new Map(Object.entries({
+  Math: 'abs acos acosh asin asinh atan atanh atan2 ceil cbrt exp expm1 floor fround hypot imul log log1p log2 log10 max min pow round sign sin sinh sqrt tan tanh trunc clz32',
+  ObjectConstructor: 'is keys values entries fromEntries hasOwn',
+  ArrayConstructor: 'isArray of',
+  Array: 'at concat every filter find findIndex findLast findLastIndex flat flatMap includes indexOf join lastIndexOf map reduce reduceRight slice some toReversed toSorted toSpliced with',
+  ReadonlyArray: 'at concat every filter find findIndex findLast findLastIndex flat flatMap includes indexOf join lastIndexOf map reduce reduceRight slice some toReversed toSorted toSpliced with',
+  String: 'at charAt charCodeAt codePointAt concat endsWith includes indexOf lastIndexOf normalize padEnd padStart repeat slice startsWith substring toLowerCase toUpperCase trim trimEnd trimStart toString valueOf',
+  StringConstructor: 'fromCharCode fromCodePoint',
+  Number: 'toExponential toFixed toPrecision toString valueOf',
+  NumberConstructor: 'isFinite isInteger isNaN isSafeInteger parseFloat parseInt',
+  Boolean: 'toString valueOf',
+  JSON: 'parse stringify',
+}).map(([owner, names]) => [owner, new Set(names.split(' '))]));
+const PURE_LIBRARY_GLOBALS = new Set([
+  'parseInt', 'parseFloat', 'isFinite', 'isNaN',
+  'encodeURI', 'encodeURIComponent', 'decodeURI', 'decodeURIComponent',
+]);
+
+function validateTypePurity(program, sourceFile) {
+  if (!sourceFile) return [];
+  const checker = program.getTypeChecker();
+  const errors = [];
+  const seen = new Set();
+  function report(node, message) {
+    const line = sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+    const key = `${line}:${message}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      errors.push({ line, code: 'PURETS', message });
+    }
+  }
+  function checkCallableType(node, type) {
+    if (type.isUnionOrIntersection()) {
+      for (const part of type.types) checkCallableType(node, part);
+      return;
+    }
+    // Function's constructor/call/apply/bind are reflection escape hatches,
+    // including aliases whose type has no ordinary call signature.
+    const symbol = type.getSymbol();
+    if (symbol?.name === 'Function' && symbol.declarations?.some(d => program.isSourceFileDefaultLibrary(d.getSourceFile()))) {
+      report(node, 'Dynamic Function values are not allowed. Use a checked function with a concrete signature.');
+    }
+    for (const signature of type.getCallSignatures()) {
+      const declaration = signature.getDeclaration();
+      if (!declaration) {
+        report(node, 'Callable provenance is unknown; this operation is not allowed in pure code.');
+        continue;
+      }
+      const file = declaration.getSourceFile();
+      const isOverride = resolve(file.fileName) === resolve(__dirname, 'purets-overrides.d.ts');
+      if (!program.isSourceFileDefaultLibrary(file) && !isOverride) continue;
+      const owner = declaration.parent?.name?.text;
+      const name = declaration.name?.text;
+      const allowed = PURE_LIBRARY_MEMBERS.get(owner)?.has(name) ||
+        (ts.isFunctionDeclaration(declaration) && PURE_LIBRARY_GLOBALS.has(name));
+      if (!allowed) {
+        report(node, `Standard-library operation '${owner ? owner + '.' : ''}${name || 'call'}' is not allowed. Only reviewed pure operations may be used.`);
+      }
+    }
+  }
+  function walk(node) {
+    // Check references as well as calls: an unsafe function cannot be extracted
+    // and passed into map/reduce or hidden in an object before it is invoked.
+    const isMemberReceiver = node.parent && (ts.isPropertyAccessExpression(node.parent) || ts.isElementAccessExpression(node.parent)) && node.parent.expression === node;
+    const isBindingSource = node.parent && ts.isVariableDeclaration(node.parent) &&
+      node.parent.initializer === node && ts.isObjectBindingPattern(node.parent.name);
+    if (!isMemberReceiver && !isBindingSource && (ts.isIdentifier(node) || ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node))) {
+      checkCallableType(node, checker.getTypeAtLocation(node));
+    }
+    if (ts.isCallExpression(node) || ts.isTaggedTemplateExpression(node)) {
+      const callee = ts.isCallExpression(node) ? node.expression : node.tag;
+      const type = checker.getTypeAtLocation(callee);
+      if (type.flags & ts.TypeFlags.Any) {
+        report(node, "Calling a value of type 'any' is not allowed. Callable purity cannot be checked.");
+      }
+      checkCallableType(callee, type);
+    }
+    if (isRuntimeFunction(node) && node.body && !ts.isSetAccessorDeclaration(node)) {
+      const signature = checker.getSignatureFromDeclaration(node);
+      if (signature) {
+        const type = checker.getReturnTypeOfSignature(signature);
+        const name = checker.typeToString(type);
+        if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.Void | ts.TypeFlags.Never)) {
+          report(node, `Function infers return type '${name}'. Functions must return a concrete data type.`);
+        }
+        if (checker.getPromisedTypeOfPromise(type)) {
+          report(node, `Function infers return type '${name}'. Async/Promise types are not allowed.`);
+        }
+      }
+    }
+    ts.forEachChild(node, walk);
+  }
+  walk(sourceFile);
+  return errors.sort((a, b) => a.line - b.line);
+}
+
+function createTypeProgram(filePath, extraTscOptions = {}, content) {
   const overridePath = resolve(__dirname, "purets-overrides.d.ts");
-  const program = ts.createProgram([overridePath, filePath], {
+  const options = {
     strict: true,
     noEmit: true,
     // ES2023 so the non-mutating array methods (toSorted, toReversed,
@@ -490,9 +558,17 @@ function checkTypes(filePath, extraTscOptions = {}) {
     noFallthroughCasesInSwitch: true,
     noPropertyAccessFromIndexSignature: true,
     ...extraTscOptions,
-  });
+  };
+  const host = ts.createCompilerHost(options);
+  if (content !== undefined) {
+    const readFile = host.readFile;
+    host.readFile = (path) => resolve(path) === filePath ? content : readFile(path);
+  }
+  return ts.createProgram([overridePath, filePath], options, host);
+}
 
-  const checker = program.getTypeChecker();
+function checkTypes(filePath, extraTscOptions = {}) {
+  const program = createTypeProgram(filePath, extraTscOptions);
   const sourceFile = program.getSourceFile(filePath);
   const errors = [];
 
@@ -510,46 +586,7 @@ function checkTypes(filePath, extraTscOptions = {}) {
     }
   }
 
-  // Check inferred return types of functions (arrow + standard)
-  if (sourceFile) {
-    for (const statement of sourceFile.statements) {
-      let fnNodes = [];
-
-      if (ts.isVariableStatement(statement)) {
-        for (const decl of statement.declarationList.declarations) {
-          if (decl.initializer && ts.isArrowFunction(decl.initializer)) {
-            fnNodes.push({ node: decl.initializer, pos: decl.getStart() });
-          }
-        }
-      } else if (ts.isFunctionDeclaration(statement)) {
-        fnNodes.push({ node: statement, pos: statement.getStart() });
-      }
-
-      for (const { node: fnNode, pos } of fnNodes) {
-        const sig = checker.getSignatureFromDeclaration(fnNode);
-        if (sig) {
-          const returnType = checker.getReturnTypeOfSignature(sig);
-          const typeName = checker.typeToString(returnType);
-          const { line } = sourceFile.getLineAndCharacterOfPosition(pos);
-
-          if (BANNED_RETURN_TYPES.has(typeName)) {
-            errors.push({
-              line: line + 1,
-              code: "PURETS",
-              message: `Function infers return type '${typeName}'. Functions must return a concrete data type.`,
-            });
-          }
-          if (typeName.startsWith("Promise")) {
-            errors.push({
-              line: line + 1,
-              code: "PURETS",
-              message: `Function infers return type '${typeName}'. Async/Promise types are not allowed.`,
-            });
-          }
-        }
-      }
-    }
-  }
+  errors.push(...validateTypePurity(program, sourceFile));
 
   return errors;
 }
