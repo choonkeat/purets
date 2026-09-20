@@ -272,6 +272,85 @@ test("JSON.parse with type narrowing works", () => {
   assert(out.includes("All values type-check successfully"), "Expected success with narrowed JSON.parse");
 });
 
+// --- Function body purity ---
+
+console.log("\nFunction body purity:");
+
+test("pure immutable updates allowed (spread, toSorted, if, switch)", () => {
+  const out = check("valid-pure-updates.pure.ts");
+  assert(out.includes("All values type-check successfully"), "Expected success message");
+});
+
+test("mutating array methods banned (xs.push)", () => {
+  const out = checkFails("invalid-mutating-method.pure.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("push") && out.includes("mutates in place"), "Expected push rejection");
+});
+
+test("assignment inside a function banned", () => {
+  const out = checkFails("invalid-assignment.pure.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("Assignment is not allowed"), "Expected assignment rejection");
+});
+
+test("let inside a function banned", () => {
+  const out = checkFails("invalid-let-in-function.pure.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("'let' is not allowed"), "Expected let rejection");
+});
+
+test("loops inside a function banned", () => {
+  const out = checkFails("invalid-loop-in-function.pure.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("allowed inside a .pure.ts function body"), "Expected loop rejection");
+});
+
+test("throw inside a function banned", () => {
+  const out = checkFails("invalid-throw-in-function.pure.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("allowed inside a .pure.ts function body"), "Expected throw rejection");
+});
+
+test("mutation inside a nested callback banned", () => {
+  const out = checkFails("invalid-nested-impure-callback.pure.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("Assignment is not allowed"), "Expected nested assignment rejection");
+});
+
+test("Object.assign banned", () => {
+  const out = checkFails("invalid-object-assign.pure.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("Object.assign"), "Expected Object.assign rejection");
+});
+
+// --- Determinism ---
+
+console.log("\nDeterminism:");
+
+test("Math.random banned", () => {
+  const out = checkFails("invalid-nondeterministic.pure.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("Math.random"), "Expected Math.random rejection");
+});
+
+test("Date banned", () => {
+  const out = checkFails("invalid-date.pure.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("'Date' is not allowed"), "Expected Date rejection");
+});
+
+test("eval banned", () => {
+  const out = checkFails("invalid-eval.pure.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("'eval' is not allowed"), "Expected eval rejection");
+});
+
+test("new expressions banned", () => {
+  const out = checkFails("invalid-new-expression.pure.ts");
+  assert(out !== null, "Expected validation to fail");
+  assert(out.includes("'new' is not allowed"), "Expected new rejection");
+});
+
 // --- Summary ---
 console.log(`\n${passed + failed} tests, ${passed} passed, ${failed} failed\n`);
 process.exit(failed > 0 ? 1 : 0);

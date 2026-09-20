@@ -12,7 +12,8 @@ Think of it as `"use strict"` for purity. Your `.pure.ts` files are guaranteed t
 - Have no side effects
 - Import only from other `.pure.ts` files (transitive purity)
 - Contain no IO (`fetch`, `console`, `process`, etc.)
-- Use only `const` (no `let`/`var`)
+- Use only `const` (no `let`/`var`), and never mutate a value
+- Be deterministic (no `Date`, `Math.random`, `crypto`)
 - Return concrete types (no `void`, `any`, `never`)
 
 ## The Rules
@@ -46,17 +47,25 @@ export { greet, adults }
 
 | Construct | Why |
 |-----------|-----|
-| `class` | Encapsulates mutable state |
+| `class` / `new` | Encapsulates mutable state |
 | `interface` | Use `type` instead |
 | `enum` | Use union types instead |
 | `let` / `var` | Mutation |
-| `this` | Stateful, impure |
-| `async` / `await` | IO |
+| `this` / `super` | Stateful, impure |
+| `async` / `await` / `yield` | IO |
 | `console`, `fetch`, `process`, `window` | Side effects |
+| `Date`, `Math.random`, `crypto`, `performance` | Non-deterministic |
+| `eval`, `Function`, `Reflect`, `Proxy`, `globalThis` | Escape hatches out of the subset |
+| `x = y`, `x += y`, `x++`, `delete x.k` | Mutation |
+| `.push()`, `.sort()`, `.splice()`, `.set()`, … | Mutate in place — use `[...xs, x]`, `xs.toSorted()` |
+| `Object.assign`, `Object.defineProperty` | Mutate their argument — use object spread |
 | `import` from non-`.pure.ts` | Breaks purity chain |
 | `export default` | Use named exports |
-| Control flow at top level | `if`/`for`/`while`/`try` |
+| Statements at top level other than `type`/`const`/`function`/`import`/`export` | Nothing to execute at load time |
+| Statements inside a function other than `const`, `return`, `if`, `switch` | Loops need mutation; `throw` makes the function partial; a discarded expression is a side effect |
 | Return type `void`/`any`/`never`/`Promise` | Must return concrete data |
+
+These rules apply at every depth — inside function bodies and inside callbacks passed to `.map()`, `.filter()` and friends, not just at the top level.
 
 ## Quick Start
 
@@ -108,7 +117,7 @@ Your regular `.ts` files can import from `.pure.ts` files freely. The purity gua
 
 `purets` uses the TypeScript compiler API directly:
 
-1. **AST validation** — walks the syntax tree to enforce the subset rules
+1. **AST validation** — walks the syntax tree (top level *and* every function body) to enforce the subset rules
 2. **Type checking** — runs `tsc` with `--strict` for full type safety
 3. **Return type analysis** — checks inferred return types of functions
 

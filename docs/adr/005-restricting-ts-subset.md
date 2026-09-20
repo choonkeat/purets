@@ -1,6 +1,6 @@
 # ADR-005: Restricting the TypeScript subset
 
-**Status:** Accepted
+**Status:** Accepted — superseded in part by [ADR-007](007-enforcing-purity-inside-function-bodies.md), which fixes the rules below being enforced only at the top level
 
 **Date:** 2026-03-14
 
